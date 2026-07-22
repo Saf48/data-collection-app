@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>FieldCollect — Data Collection</title>
+<meta name="description" content="Mobile-first field data collection app with live GPS capture, document upload, and cloud database storage." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#0f172a',
+          paper: '#f8fafc',
+          brand: { 50:'#eef2ff',100:'#e0e7ff',400:'#818cf8',500:'#6366f1',600:'#4f46e5',700:'#4338ca' },
+          signal: { 50:'#f0fdfa',400:'#2dd4bf',500:'#14b8a6',600:'#0d9488' },
+          caution: { 50:'#fffbeb',400:'#fbbf24',500:'#f59e0b',600:'#d97706' },
+          alert: { 50:'#fff1f2',500:'#e11d48',600:'#be123c' },
+        },
+        fontFamily: {
+          display: ['"Space Grotesk"','sans-serif'],
+          body: ['"Inter"','sans-serif'],
+          mono: ['"JetBrains Mono"','monospace'],
+        },
+        boxShadow: {
+          card: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.12)',
+          lift: '0 12px 32px -14px rgba(79,70,229,0.35)',
+        },
+        animation: {
+          'ping-slow': 'ping 2.2s cubic-bezier(0,0,0.2,1) infinite',
+          'ping-slower': 'ping 2.2s cubic-bezier(0,0,0.2,1) infinite 0.6s',
+          'in': 'fadeIn .18s ease-out',
+          'spin-slow': 'spin 1s linear infinite',
+        },
+        keyframes: {
+          fadeIn: { '0%': { opacity: 0, transform: 'translateY(4px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+        },
+      },
+    },
+  };
+</script>
+<script src="https://unpkg.com/lucide@latest"></script>
+
+<!-- Supabase client (CDN, no build step required) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<style>
+  html, body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+  ::selection { background: #c7d2fe; }
+  .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .font-mono-data { font-family: 'JetBrains Mono', monospace; }
+  input:focus-visible, button:focus-visible, textarea:focus-visible {
+    outline: 2px solid #4f46e5; outline-offset: 2px;
+  }
+  .segment-btn[data-active="true"] { background: #0f172a; color: #fff; }
+  .dropzone[data-drag="true"] { border-color: #6366f1; background: #eef2ff; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+
+<body class="bg-paper text-ink antialiased">
+
+<div id="app" class="max-w-lg mx-auto min-h-screen flex flex-col relative">
+
+  <!-- ===== Header / Nav ===== -->
+  <header class="sticky top-0 z-30 bg-paper/90 backdrop-blur border-b border-slate-200">
+    <div class="px-4 pt-4 pb-3 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-ink flex items-center justify-center shrink-0">
+          <i data-lucide="map-pin-check" class="w-5 h-5 text-signal-400"></i>
+        </div>
+        <div class="leading-tight">
+          <h1 class="font-display font-bold text-[17px] tracking-tight">FieldCollect</h1>
+          <p class="text-[11px] text-slate-500 -mt-0.5 flex items-center gap-1">
+            <span id="dbStatusDot" class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+            <span id="dbStatusText">Checking database…</span>
+          </p>
+        </div>
+      </div>
+      <button id="recordsCountPill" class="hidden sm:flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+        <i data-lucide="database" class="w-3.5 h-3.5"></i>
+        <span id="recordsCount">0</span> saved
+      </button>
+    </div>
+
+    <div class="px-4 pb-3">
+      <div class="grid grid-cols-2 gap-1 bg-slate-100 rounded-2xl p-1">
+        <button id="tabEntryBtn" data-active="true" class="segment-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold text-slate-500 transition-all duration-200">
+          <i data-lucide="square-pen" class="w-4 h-4"></i> New Entry
+        </button>
+        <button id="tabRecordsBtn" data-active="false" class="segment-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold text-slate-500 transition-all duration-200">
+          <i data-lucide="layers" class="w-4 h-4"></i> Saved Records
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== Setup banner (shown until Supabase credentials are added) ===== -->
+  <div id="setupBanner" class="hidden mx-4 mt-3 bg-caution-50 border border-caution-400/40 rounded-2xl p-3.5">
+    <div class="flex gap-2.5">
+      <i data-lucide="database-zap" class="w-4.5 h-4.5 text-caution-600 shrink-0 mt-0.5"></i>
+      <div class="min-w-0 w-full">
+        <p class="text-sm font-semibold text-amber-800">Database not connected</p>
+        <p class="text-[12.5px] text-amber-700 mt-0.5 leading-snug">
+          Enter your Supabase project URL and anon key below to enable saving records to the database.
+        </p>
+        <div class="mt-3 space-y-2">
+          <label for="supabaseUrlInput" class="block text-[11px] font-semibold uppercase tracking-wide text-amber-800">Supabase URL</label>
+          <input id="supabaseUrlInput" type="url" placeholder="https://your-project.supabase.co"
+            class="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+          <label for="supabaseKeyInput" class="block text-[11px] font-semibold uppercase tracking-wide text-amber-800">Anon key</label>
+          <input id="supabaseKeyInput" type="password" placeholder="your-anon-key"
+            class="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+          <button id="connectDbBtn" type="button" class="w-full rounded-xl bg-amber-700 px-3 py-2 text-sm font-semibold text-white">Connect database</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Main ===== -->
+  <main class="flex-1 px-4 pt-4 pb-32 space-y-4">
+
+    <!-- ============ VIEW: NEW ENTRY ============ -->
+    <section id="viewEntry" class="space-y-4 animate-in">
+
+      <!-- Card: Respondent details -->
+      <div class="bg-white rounded-2xl shadow-card border border-slate-100 p-4">
+        <div class="flex items-center gap-2 mb-3.5">
+          <div class="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center">
+            <i data-lucide="user-round" class="w-4 h-4 text-brand-600"></i>
+          </div>
+          <h2 class="font-display font-semibold text-[15px]">Respondent details</h2>
+        </div>
+
+        <div class="space-y-3.5">
+          <div>
+            <label for="fullName" class="block text-xs font-medium text-slate-600 mb-1.5">Full name <span class="text-alert-500">*</span></label>
+            <div class="relative">
+              <input id="fullName" type="text" placeholder="e.g. Ama Owusu" autocomplete="name"
+                class="w-full pl-3.5 pr-9 py-3 rounded-xl border border-slate-200 bg-slate-50 text-[15px] placeholder:text-slate-400 focus:bg-white focus:border-brand-500 transition-colors" />
+              <i data-lucide="check-circle-2" id="fullNameCheck" class="w-4 h-4 text-signal-500 absolute right-3 top-1/2 -translate-y-1/2 hidden"></i>
+            </div>
+            <p id="fullNameError" class="hidden text-xs text-alert-500 mt-1">Enter the respondent's full name.</p>
+          </div>
+
+          <div>
+            <label for="phone" class="block text-xs font-medium text-slate-600 mb-1.5">Telephone number <span class="text-alert-500">*</span></label>
+            <div class="relative">
+              <i data-lucide="phone" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+              <input id="phone" type="tel" inputmode="tel" placeholder="024 123 4567" autocomplete="tel"
+                class="w-full pl-10 pr-9 py-3 rounded-xl border border-slate-200 bg-slate-50 text-[15px] font-mono-data placeholder:font-body placeholder:text-slate-400 focus:bg-white focus:border-brand-500 transition-colors" />
+              <i data-lucide="check-circle-2" id="phoneCheck" class="w-4 h-4 text-signal-500 absolute right-3 top-1/2 -translate-y-1/2 hidden"></i>
+            </div>
+            <p id="phoneError" class="hidden text-xs text-alert-500 mt-1">Enter a valid phone number (at least 9 digits).</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Live GPS Location (signature element) -->
+      <div class="bg-white rounded-2xl shadow-card border border-slate-100 p-4 overflow-hidden">
+        <div class="flex items-center gap-2 mb-3.5">
+          <div class="w-8 h-8 rounded-lg bg-signal-50 flex items-center justify-center">
+            <i data-lucide="satellite" class="w-4 h-4 text-signal-600"></i>
+          </div>
+          <h2 class="font-display font-semibold text-[15px]">Live GPS location</h2>
+        </div>
+
+        <!-- idle state -->
+        <div id="geoIdle" class="block">
+          <button id="acquireBtn" type="button"
+            class="w-full flex items-center justify-center gap-2 bg-ink text-white font-semibold text-sm py-3.5 rounded-xl active:scale-[0.98] transition-transform shadow-lift">
+            <i data-lucide="locate-fixed" class="w-4.5 h-4.5"></i>
+            Acquire live location
+          </button>
+          <p class="text-[11px] text-slate-400 mt-2 text-center">Your device will ask permission to share location.</p>
+        </div>
+
+        <!-- loading state -->
+        <div id="geoLoading" class="hidden flex-col items-center py-5">
+          <div class="relative w-20 h-20 flex items-center justify-center mb-3">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-brand-400/40 animate-ping-slow"></span>
+            <span class="absolute inline-flex h-2/3 w-2/3 rounded-full bg-brand-400/40 animate-ping-slower"></span>
+            <div class="relative w-10 h-10 rounded-full bg-brand-600 flex items-center justify-center">
+              <i data-lucide="map-pin" class="w-5 h-5 text-white"></i>
+            </div>
+          </div>
+          <p class="text-sm font-medium text-slate-600">Acquiring signal…</p>
+          <p class="text-[11px] text-slate-400 mt-0.5">Hold steady for the best accuracy</p>
+        </div>
+
+        <!-- acquired state -->
+        <div id="geoSuccess" class="hidden space-y-3">
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+              <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Latitude</p>
+              <p id="latVal" class="font-mono-data text-sm font-medium">—</p>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+              <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Longitude</p>
+              <p id="lngVal" class="font-mono-data text-sm font-medium">—</p>
+            </div>
+          </div>
+
+          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+            <div class="flex items-center justify-between mb-1.5">
+              <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Accuracy radius</p>
+              <p id="accuracyVal" class="font-mono-data text-xs font-semibold">— m</p>
+            </div>
+            <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+              <div id="accuracyBar" class="h-full rounded-full bg-signal-500 transition-all duration-500" style="width:0%"></div>
+            </div>
+            <p id="accuracyNote" class="text-[11px] text-slate-400 mt-1.5"></p>
+          </div>
+
+          <div class="bg-brand-50 rounded-xl p-3 border border-brand-100 flex gap-2.5">
+            <i data-lucide="map-pinned" class="w-4 h-4 text-brand-600 shrink-0 mt-0.5"></i>
+            <div class="min-w-0">
+              <p class="text-[10px] uppercase tracking-wide text-brand-600/80 font-semibold mb-0.5">Street address</p>
+              <p id="addressVal" class="text-[13px] text-slate-700 leading-snug">Looking up address…</p>
+            </div>
+          </div>
+
+          <button id="reacquireBtn" type="button" class="w-full flex items-center justify-center gap-1.5 text-sm font-medium text-brand-600 py-2 rounded-xl hover:bg-brand-50 transition-colors">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Re-acquire location
+          </button>
+        </div>
+
+        <!-- error state -->
+        <div id="geoError" class="hidden bg-alert-50 border border-rose-100 rounded-xl p-3.5">
+          <div class="flex gap-2.5">
+            <i data-lucide="triangle-alert" class="w-4.5 h-4.5 text-alert-500 shrink-0 mt-0.5"></i>
+            <div class="min-w-0">
+              <p id="geoErrorTitle" class="text-sm font-semibold text-rose-700">Location unavailable</p>
+              <p id="geoErrorMsg" class="text-[12.5px] text-rose-600 mt-0.5 leading-snug">Something went wrong.</p>
+              <button id="retryGeoBtn" type="button" class="mt-2 text-xs font-semibold text-rose-700 underline underline-offset-2">Try again</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card: Primary ID / Photo -->
+      <div class="bg-white rounded-2xl shadow-card border border-slate-100 p-4">
+        <div class="flex items-center gap-2 mb-3.5">
+          <div class="w-8 h-8 rounded-lg bg-caution-50 flex items-center justify-center">
+            <i data-lucide="id-card" class="w-4 h-4 text-caution-600"></i>
+          </div>
+          <h2 class="font-display font-semibold text-[15px]">Primary ID / Photo</h2>
+        </div>
+        <div id="dropzonePrimary" class="dropzone relative border-2 border-dashed border-slate-200 rounded-xl p-5 text-center cursor-pointer transition-colors" data-drag="false">
+          <input id="filePrimary" type="file" accept="image/*,.pdf" class="absolute inset-0 opacity-0 cursor-pointer" />
+          <div id="dzPrimaryEmpty" class="pointer-events-none">
+            <i data-lucide="image-plus" class="w-6 h-6 text-slate-400 mx-auto mb-1.5"></i>
+            <p class="text-[13px] font-medium text-slate-600">Drop image here, or tap to browse</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">JPG, PNG or PDF</p>
+          </div>
+          <div id="dzPrimaryFilled" class="hidden pointer-events-none"></div>
+        </div>
+      </div>
+
+      <!-- Card: Supporting Document -->
+      <div class="bg-white rounded-2xl shadow-card border border-slate-100 p-4">
+        <div class="flex items-center gap-2 mb-3.5">
+          <div class="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center">
+            <i data-lucide="file-stack" class="w-4 h-4 text-brand-600"></i>
+          </div>
+          <h2 class="font-display font-semibold text-[15px]">Supporting document / PDF</h2>
+        </div>
+        <div id="dropzoneSupport" class="dropzone relative border-2 border-dashed border-slate-200 rounded-xl p-5 text-center cursor-pointer transition-colors" data-drag="false">
+          <input id="fileSupport" type="file" accept="application/pdf,image/*" class="absolute inset-0 opacity-0 cursor-pointer" />
+          <div id="dzSupportEmpty" class="pointer-events-none">
+            <i data-lucide="file-up" class="w-6 h-6 text-slate-400 mx-auto mb-1.5"></i>
+            <p class="text-[13px] font-medium text-slate-600">Drop file here, or tap to browse</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">PDF, JPG or PNG</p>
+          </div>
+          <div id="dzSupportFilled" class="hidden pointer-events-none"></div>
+        </div>
+      </div>
+
+      <p id="formHint" class="text-[12px] text-slate-400 text-center px-4">Fields marked <span class="text-alert-500">*</span> are required. Location and documents are optional but recommended.</p>
+    </section>
+
+    <!-- ============ VIEW: SAVED RECORDS ============ -->
+    <section id="viewRecords" class="hidden space-y-3.5 animate-in">
+      <div class="relative">
+        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+        <input id="searchInput" type="text" placeholder="Search by name, phone or address"
+          class="w-full pl-10 pr-9 py-3 rounded-xl border border-slate-200 bg-white text-[14px] placeholder:text-slate-400 focus:border-brand-500 transition-colors shadow-card" />
+        <button id="clearSearchBtn" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+          <i data-lucide="x-circle" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div id="recordsLoading" class="hidden flex-col items-center py-14">
+        <i data-lucide="loader-2" class="w-6 h-6 text-brand-500 animate-spin-slow"></i>
+        <p class="text-[13px] text-slate-400 mt-2">Loading records from the database…</p>
+      </div>
+
+      <div id="recordsList" class="space-y-3"></div>
+
+      <div id="recordsEmpty" class="hidden flex-col items-center text-center py-14 px-6">
+        <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+          <i data-lucide="inbox" class="w-6 h-6 text-slate-400"></i>
+        </div>
+        <p class="font-display font-semibold text-slate-700">No records yet</p>
+        <p class="text-[13px] text-slate-400 mt-1 max-w-[220px]">Entries you save will appear here, ready to search and review.</p>
+      </div>
+
+      <div id="recordsNoMatch" class="hidden flex-col items-center text-center py-14 px-6">
+        <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+          <i data-lucide="search-x" class="w-6 h-6 text-slate-400"></i>
+        </div>
+        <p class="font-display font-semibold text-slate-700">No matches</p>
+        <p class="text-[13px] text-slate-400 mt-1 max-w-[220px]">Try a different name, number or address.</p>
+      </div>
+
+      <div id="recordsFetchError" class="hidden flex-col items-center text-center py-14 px-6">
+        <div class="w-14 h-14 rounded-2xl bg-alert-50 flex items-center justify-center mb-3">
+          <i data-lucide="cloud-off" class="w-6 h-6 text-alert-500"></i>
+        </div>
+        <p class="font-display font-semibold text-slate-700">Couldn't load records</p>
+        <p class="text-[13px] text-slate-400 mt-1 max-w-[240px]">Check your connection and database setup, then try again.</p>
+        <button id="retryFetchBtn" class="mt-3 text-sm font-semibold text-brand-600">Retry</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== Sticky submit bar (Entry view only) ===== -->
+  <div id="submitBar" class="fixed bottom-0 left-0 right-0 z-30">
+    <div class="max-w-lg mx-auto px-4 pb-4 pt-3 bg-gradient-to-t from-paper via-paper/95 to-transparent">
+      <button id="submitBtn" type="button"
+        class="w-full flex items-center justify-center gap-2 bg-brand-600 text-white font-semibold text-[15px] py-3.5 rounded-2xl shadow-lift active:scale-[0.98] transition-transform disabled:opacity-60">
+        <i data-lucide="save" class="w-4.5 h-4.5"></i>
+        <span id="submitBtnLabel">Save record</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Confirmation Modal ===== -->
+  <div id="confirmModal" class="hidden fixed inset-0 z-50 items-end sm:items-center justify-center">
+    <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" id="confirmOverlay"></div>
+    <div class="relative bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-5 pb-6 animate-in max-h-[85vh] overflow-y-auto no-scrollbar">
+      <div class="w-11 h-11 rounded-2xl bg-signal-50 flex items-center justify-center mb-3">
+        <i data-lucide="badge-check" class="w-6 h-6 text-signal-600"></i>
+      </div>
+      <h3 id="confirmTitle" class="font-display font-bold text-lg">Record saved</h3>
+      <p id="confirmSubtitle" class="text-[13px] text-slate-500 mt-0.5 mb-4">Here's a summary of what was captured.</p>
+
+      <div id="confirmSummary" class="space-y-2.5 text-sm"></div>
+
+      <div class="flex gap-2.5 mt-5">
+        <button id="confirmCloseBtn" class="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm">Add another</button>
+        <button id="confirmViewBtn" class="flex-1 py-3 rounded-xl bg-ink text-white font-medium text-sm">View records</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Record Detail Modal ===== -->
+  <div id="detailModal" class="hidden fixed inset-0 z-50 items-end sm:items-center justify-center">
+    <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" id="detailOverlay"></div>
+    <div class="relative bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-5 pb-6 animate-in max-h-[85vh] overflow-y-auto no-scrollbar">
+      <div class="flex items-start justify-between mb-3">
+        <h3 class="font-display font-bold text-lg pr-4">Record details</h3>
+        <button id="detailCloseX" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+          <i data-lucide="x" class="w-4 h-4 text-slate-500"></i>
+        </button>
+      </div>
+      <div id="detailContent" class="space-y-3 text-sm"></div>
+      <button id="detailDeleteBtn" class="w-full mt-5 py-3 rounded-xl bg-alert-50 text-alert-500 font-semibold text-sm flex items-center justify-center gap-2">
+        <i data-lucide="trash-2" class="w-4 h-4"></i> Delete record
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Delete confirm modal ===== -->
+  <div id="deleteConfirmModal" class="hidden fixed inset-0 z-[60] items-center justify-center px-6">
+    <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" id="deleteOverlay"></div>
+    <div class="relative bg-white w-full max-w-xs rounded-2xl p-5 animate-in">
+      <p class="font-display font-semibold text-[15px] mb-1">Delete this record?</p>
+      <p class="text-[13px] text-slate-500 mb-4">This removes it from the database permanently.</p>
+      <div class="flex gap-2.5">
+        <button id="deleteCancelBtn" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm">Cancel</button>
+        <button id="deleteConfirmBtn" class="flex-1 py-2.5 rounded-xl bg-alert-500 text-white font-medium text-sm">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Toast ===== -->
+  <div id="toast" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-[70] max-w-[92%]">
+    <div class="bg-ink text-white text-[13px] font-medium px-4 py-2.5 rounded-xl shadow-lift flex items-center gap-2">
+      <i data-lucide="info" class="w-4 h-4 shrink-0"></i>
+      <span id="toastMsg">Message</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =====================================================================
+     DATABASE CONFIG — Supabase
+     ---------------------------------------------------------------------
+     1. Create a free project at https://supabase.com
+     2. In the SQL editor, run the schema in the setup notes provided
+        alongside this file (creates the `records` table + storage bucket
+        policies).
+     3. In Project Settings → API, copy your "Project URL" and "anon public"
+        key and paste them below. The anon key is safe to expose in
+        client-side code as long as Row Level Security policies are set.
+     ===================================================================== */
+  let SUPABASE_URL = "";
+  let SUPABASE_ANON_KEY = "";
+  const TABLE_NAME = "records";
+  const BUCKET_NAME = "field-documents";
+
+  function isValidHttpUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function applySupabaseConfig(url, key) {
+    SUPABASE_URL = (url || "").trim();
+    SUPABASE_ANON_KEY = (key || "").trim();
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      localStorage.setItem("fieldcollect.supabaseUrl", SUPABASE_URL);
+      localStorage.setItem("fieldcollect.supabaseAnonKey", SUPABASE_ANON_KEY);
+    }
+    return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && isValidHttpUrl(SUPABASE_URL);
+  }
+
+  let isConfigured = false;
+  let isDbReady = false;
+  let sb = null;
+
+  function initializeSupabase() {
+    const savedUrl = localStorage.getItem("fieldcollect.supabaseUrl") || "";
+    const savedKey = localStorage.getItem("fieldcollect.supabaseAnonKey") || "";
+    isConfigured = applySupabaseConfig(savedUrl, savedKey);
+    isDbReady = false;
+    if (isConfigured && window.supabase) {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } else {
+      sb = null;
+    }
+  }
+
+  initializeSupabase();
+
+  /* ---------- State ---------- */
+  let records = [];              // records fetched from the database
+  let currentLocation = null;     // { lat, lng, accuracy, address }
+  let files = { primary: null, support: null }; // { file: File, name, size, type, previewUrl }
+  let isSaving = false;
+  let activeDetailId = null;
+
+  /* ---------- Elements ---------- */
+  const $ = (id) => document.getElementById(id);
+  const tabEntryBtn = $("tabEntryBtn"), tabRecordsBtn = $("tabRecordsBtn");
+  const viewEntry = $("viewEntry"), viewRecords = $("viewRecords");
+  const submitBar = $("submitBar");
+  const setupBanner = $("setupBanner");
+  const supabaseUrlInput = $("supabaseUrlInput"), supabaseKeyInput = $("supabaseKeyInput");
+  const connectDbBtn = $("connectDbBtn");
+  const dbStatusDot = $("dbStatusDot"), dbStatusText = $("dbStatusText");
+
+  const fullNameInput = $("fullName"), phoneInput = $("phone");
+  const fullNameCheck = $("fullNameCheck"), phoneCheck = $("phoneCheck");
+  const fullNameError = $("fullNameError"), phoneError = $("phoneError");
+
+  const acquireBtn = $("acquireBtn"), reacquireBtn = $("reacquireBtn"), retryGeoBtn = $("retryGeoBtn");
+  const geoIdle = $("geoIdle"), geoLoading = $("geoLoading"), geoSuccess = $("geoSuccess"), geoError = $("geoError");
+  const latVal = $("latVal"), lngVal = $("lngVal"), accuracyVal = $("accuracyVal"), accuracyBar = $("accuracyBar");
+  const accuracyNote = $("accuracyNote"), addressVal = $("addressVal");
+  const geoErrorTitle = $("geoErrorTitle"), geoErrorMsg = $("geoErrorMsg");
+
+  const dropzonePrimary = $("dropzonePrimary"), filePrimary = $("filePrimary");
+  const dzPrimaryEmpty = $("dzPrimaryEmpty"), dzPrimaryFilled = $("dzPrimaryFilled");
+  const dropzoneSupport = $("dropzoneSupport"), fileSupport = $("fileSupport");
+  const dzSupportEmpty = $("dzSupportEmpty"), dzSupportFilled = $("dzSupportFilled");
+
+  const submitBtn = $("submitBtn"), submitBtnLabel = $("submitBtnLabel");
+  const confirmModal = $("confirmModal"), confirmOverlay = $("confirmOverlay"), confirmSummary = $("confirmSummary");
+  const confirmTitle = $("confirmTitle"), confirmSubtitle = $("confirmSubtitle");
+  const confirmCloseBtn = $("confirmCloseBtn"), confirmViewBtn = $("confirmViewBtn");
+
+  const searchInput = $("searchInput"), clearSearchBtn = $("clearSearchBtn");
+  const recordsList = $("recordsList"), recordsEmpty = $("recordsEmpty"), recordsNoMatch = $("recordsNoMatch");
+  const recordsLoading = $("recordsLoading"), recordsFetchError = $("recordsFetchError"), retryFetchBtn = $("retryFetchBtn");
+  const recordsCount = $("recordsCount");
+
+  const detailModal = $("detailModal"), detailOverlay = $("detailOverlay"), detailContent = $("detailContent");
+  const detailCloseX = $("detailCloseX"), detailDeleteBtn = $("detailDeleteBtn");
+  const deleteConfirmModal = $("deleteConfirmModal"), deleteOverlay = $("deleteOverlay");
+  const deleteCancelBtn = $("deleteCancelBtn"), deleteConfirmBtn = $("deleteConfirmBtn");
+
+  const toast = $("toast"), toastMsg = $("toastMsg");
+
+  function icons() { if (window.lucide) window.lucide.createIcons(); }
+
+  /* ---------- DB status indicator ---------- */
+  function setDbStatus(state, label) {
+    const colors = { ok: "bg-signal-500", warn: "bg-caution-500", off: "bg-alert-500", checking: "bg-slate-300" };
+    dbStatusDot.className = "w-1.5 h-1.5 rounded-full " + (colors[state] || colors.checking);
+    dbStatusText.textContent = label;
+  }
+  if (!isConfigured) {
+    setDbStatus("warn", "Connect database");
+    setupBanner.classList.remove("hidden");
+    setupBanner.querySelectorAll("p")[0].textContent = "Database not connected";
+    setupBanner.querySelectorAll("p")[1].textContent = "Enter your Supabase URL and anon key below to enable saving records to the database.";
+  } else {
+    setDbStatus("checking", "Connecting…");
+  }
+
+  /* ---------- Toast ---------- */
+  let toastTimer = null;
+  function showToast(msg) {
+    toastMsg.textContent = msg;
+    toast.classList.remove("hidden");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add("hidden"), 3600);
+  }
+
+  function getSafeMessage(err, fallback = "The save could not be completed.") {
+    const raw = err && err.message ? String(err.message) : String(err || "");
+    const compact = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (!compact) return fallback;
+    const lower = compact.toLowerCase();
+    if (
+      lower.includes("<!doctype") ||
+      lower.includes("<html") ||
+      lower.includes("supabase:root") ||
+      lower.includes("looking for something") ||
+      lower.includes("next.js") ||
+      lower.includes("pageprops") ||
+      lower.includes("404") ||
+      compact.length > 240
+    ) {
+      return fallback;
+    }
+    return compact.length > 140 ? compact.slice(0, 137) + "..." : compact;
+  }
+
+  /* ---------- Supabase connection ---------- */
+  async function connectSupabaseFromForm() {
+    const url = supabaseUrlInput.value.trim();
+    const key = supabaseKeyInput.value.trim();
+    if (!url || !key) {
+      showToast("Enter your Supabase URL and anon key.");
+      return;
+    }
+
+    const configured = applySupabaseConfig(url, key);
+    if (!configured) {
+      showToast("Enter a valid Supabase URL.");
+      return;
+    }
+
+    if (!window.supabase) {
+      showToast("Supabase client failed to load.");
+      return;
+    }
+
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    isConfigured = true;
+    isDbReady = false;
+    setupBanner.classList.add("hidden");
+    setDbStatus("checking", "Connecting…");
+
+    try {
+      const { error } = await sb.from(TABLE_NAME).select("id", { count: "exact", head: true });
+      if (error) throw error;
+      isDbReady = true;
+      setDbStatus("ok", "Connected");
+      showToast("Database connected.");
+      await checkConnection();
+    } catch (err) {
+      console.error(err);
+      isDbReady = false;
+      setDbStatus("warn", "Connection issue");
+      setupBanner.classList.remove("hidden");
+      showToast("Couldn't connect to Supabase. Check your URL and anon key.");
+    }
+  }
+  connectDbBtn.addEventListener("click", connectSupabaseFromForm);
+
+  /* ---------- Tabs ---------- */
+  function setTab(tab) {
+    const isEntry = tab === "entry";
+    tabEntryBtn.setAttribute("data-active", isEntry ? "true" : "false");
+    tabRecordsBtn.setAttribute("data-active", isEntry ? "false" : "true");
+    viewEntry.classList.toggle("hidden", !isEntry);
+    viewRecords.classList.toggle("hidden", isEntry);
+    submitBar.classList.toggle("hidden", !isEntry);
+    if (!isEntry) fetchRecords();
+  }
+  tabEntryBtn.addEventListener("click", () => setTab("entry"));
+  tabRecordsBtn.addEventListener("click", () => setTab("records"));
+
+  /* ---------- Phone formatting ---------- */
+  function formatPhone(raw) {
+    let digits = raw.replace(/[^\d+]/g, "");
+    let plus = digits.startsWith("+");
+    digits = digits.replace(/\+/g, "");
+    if (digits.length > 13) digits = digits.slice(0, 13);
+    let out = "";
+    if (digits.length <= 10) {
+      out = digits.replace(/(\d{3})(\d{0,3})(\d{0,4})/, (m, a, b, c) => [a, b, c].filter(Boolean).join(" "));
+    } else {
+      out = digits.replace(/(\d{1,3})(\d{3})(\d{0,3})(\d{0,4})/, (m, a, b, c, d) => [a, b, c, d].filter(Boolean).join(" "));
+    }
+    return (plus ? "+" : "") + out;
+  }
+  phoneInput.addEventListener("input", (e) => {
+    const pos = e.target.selectionStart;
+    const before = e.target.value.length;
+    e.target.value = formatPhone(e.target.value);
+    const after = e.target.value.length;
+    const diff = after - before;
+    e.target.setSelectionRange(pos + diff, pos + diff);
+    validateField("phone");
+  });
+
+  /* ---------- Validation ---------- */
+  function validateField(which) {
+    if (which === "name") {
+      const ok = fullNameInput.value.trim().length >= 2;
+      fullNameCheck.classList.toggle("hidden", !ok);
+      return ok;
+    }
+    if (which === "phone") {
+      const digits = phoneInput.value.replace(/[^\d]/g, "");
+      const ok = digits.length >= 9;
+      phoneCheck.classList.toggle("hidden", !ok);
+      return ok;
+    }
+  }
+  fullNameInput.addEventListener("input", () => validateField("name"));
+
+  function validateAll(showErrors) {
+    const nameOk = fullNameInput.value.trim().length >= 2;
+    const digits = phoneInput.value.replace(/[^\d]/g, "");
+    const phoneOk = digits.length >= 9;
+    if (showErrors) {
+      fullNameError.classList.toggle("hidden", nameOk);
+      fullNameInput.classList.toggle("border-alert-500", !nameOk);
+      phoneError.classList.toggle("hidden", phoneOk);
+      phoneInput.classList.toggle("border-alert-500", !phoneOk);
+    }
+    return nameOk && phoneOk;
+  }
+
+  /* ---------- Geolocation ---------- */
+  function showGeoState(state) {
+    [geoIdle, geoLoading, geoSuccess, geoError].forEach((el) => {
+      if (el) {
+        el.classList.add("hidden");
+        el.classList.remove("flex");
+      }
+    });
+
+    if (state === "idle" && geoIdle) geoIdle.classList.remove("hidden");
+    if (state === "loading" && geoLoading) {
+      geoLoading.classList.remove("hidden");
+      geoLoading.classList.add("flex");
+    }
+    if ((state === "success" || state === "acquired") && geoSuccess) geoSuccess.classList.remove("hidden");
+    if (state === "error" && geoError) geoError.classList.remove("hidden");
+  }
+
+  async function tryIpFallback() {
+    try {
+      const res = await fetch("https://ipapi.co/json/", { mode: "cors" });
+      if (!res.ok) throw new Error("ip fallback failed");
+      const data = await res.json();
+      if (data.latitude != null && data.longitude != null) {
+        currentLocation = {
+          lat: Number(data.latitude),
+          lng: Number(data.longitude),
+          accuracy: 1200,
+          address: data.city ? `${data.city}${data.region ? ", " + data.region : ""}${data.country_name ? ", " + data.country_name : ""}` : null,
+        };
+        showGeoState("success");
+        renderLocation();
+        reverseGeocode(currentLocation.lat, currentLocation.lng);
+        return true;
+      }
+    } catch (err) {
+      console.warn("IP fallback failed:", err);
+    }
+    return false;
+  }
+
+  async function useDemoLocation() {
+    currentLocation = {
+      lat: 5.6037,
+      lng: -0.1870,
+      accuracy: 1400,
+      address: "Accra, Greater Accra, Ghana"
+    };
+    showGeoState("success");
+    renderLocation();
+    reverseGeocode(currentLocation.lat, currentLocation.lng);
+    return true;
+  }
+
+  async function acquireLocation() {
+    if (!navigator.geolocation) {
+      showGeoState("error");
+      geoErrorTitle.textContent = "Geolocation not supported";
+      geoErrorMsg.textContent = "Your browser does not support location services.";
+      return;
+    }
+
+    showGeoState("loading");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+
+        currentLocation = { lat, lng, accuracy, address: null };
+        showGeoState("success");
+        renderLocation();
+        reverseGeocode(lat, lng);
+      },
+      async (error) => {
+        console.warn("Geolocation Error:", error);
+        const fallbackWorked = await tryIpFallback();
+        if (!fallbackWorked) {
+          await useDemoLocation();
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+  }
+
+  function renderLocation() {
+    if (!currentLocation) return;
+    showGeoState("success");
+    latVal.textContent = currentLocation.lat.toFixed(6);
+    lngVal.textContent = currentLocation.lng.toFixed(6);
+    const acc = Math.round(currentLocation.accuracy);
+    accuracyVal.textContent = acc + " m";
+    const pct = Math.max(4, Math.min(100, 100 - Math.min(acc, 100)));
+    accuracyBar.style.width = pct + "%";
+    if (acc <= 15) {
+      accuracyBar.className = "h-full rounded-full bg-signal-500 transition-all duration-500";
+      accuracyNote.textContent = "Excellent precision for this reading.";
+    } else if (acc <= 50) {
+      accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
+      accuracyNote.textContent = "Good precision — usable for most records.";
+    } else if (acc <= 1500) {
+      accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
+      accuracyNote.textContent = "Fallback location — approximate city-level accuracy.";
+    } else {
+      accuracyBar.className = "h-full rounded-full bg-alert-500 transition-all duration-500";
+      accuracyNote.textContent = "Low precision — consider moving to open sky and re-acquiring.";
+    }
+    addressVal.textContent = currentLocation.address || "Looking up address…";
+    icons();
+  }
+
+  async function reverseGeocode(lat, lng) {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+        headers: { "Accept": "application/json" },
+      });
+      if (!res.ok) throw new Error("bad response");
+      const data = await res.json();
+      currentLocation.address = data.display_name || "Address not found for this location.";
+    } catch (e) {
+      currentLocation.address = "Couldn't resolve an address. Coordinates are still saved.";
+    }
+    if (addressVal) addressVal.textContent = currentLocation.address;
+  }
+
+  if (acquireBtn) acquireBtn.addEventListener("click", acquireLocation);
+  if (reacquireBtn) reacquireBtn.addEventListener("click", acquireLocation);
+  if (retryGeoBtn) retryGeoBtn.addEventListener("click", acquireLocation);
+
+  /* ---------- File dropzones (local preview only — upload happens on submit) ---------- */
+  function fileIcon(type) {
+    if (type && type.startsWith("image/")) return "image";
+    if (type === "application/pdf") return "file-text";
+    return "file";
+  }
+  function humanSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function handleFile(slot, file, zoneEmpty, zoneFilled) {
+    if (!file) return;
+    const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    files[slot] = { file, name: file.name, size: file.size, type: file.type, previewUrl };
+    renderDropzone(slot, zoneEmpty, zoneFilled);
+  }
+
+  function renderDropzone(slot, zoneEmpty, zoneFilled) {
+    const f = files[slot];
+    if (!f) { zoneEmpty.classList.remove("hidden"); zoneFilled.classList.add("hidden"); zoneFilled.innerHTML = ""; return; }
+    zoneEmpty.classList.add("hidden");
+    zoneFilled.classList.remove("hidden");
+    if (f.previewUrl) {
+      zoneFilled.innerHTML = `
+        <div class="flex items-center gap-3">
+          <img src="${f.previewUrl}" class="w-14 h-14 rounded-lg object-cover border border-slate-200" alt="Preview of ${escapeHtml(f.name)}" />
+          <div class="min-w-0 text-left flex-1">
+            <p class="text-[13px] font-medium text-slate-700 truncate">${escapeHtml(f.name)}</p>
+            <p class="text-[11px] text-slate-400">${humanSize(f.size)}</p>
+          </div>
+          <button type="button" data-remove="${slot}" class="pointer-events-auto w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+            <i data-lucide="x" class="w-3.5 h-3.5 text-slate-500"></i>
+          </button>
+        </div>`;
+    } else {
+      zoneFilled.innerHTML = `
+        <div class="flex items-center gap-3">
+          <div class="w-14 h-14 rounded-lg bg-brand-50 flex items-center justify-center shrink-0">
+            <i data-lucide="${fileIcon(f.type)}" class="w-6 h-6 text-brand-600"></i>
+          </div>
+          <div class="min-w-0 text-left flex-1">
+            <p class="text-[13px] font-medium text-slate-700 truncate">${escapeHtml(f.name)}</p>
+            <p class="text-[11px] text-slate-400">${humanSize(f.size)}</p>
+          </div>
+          <button type="button" data-remove="${slot}" class="pointer-events-auto w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+            <i data-lucide="x" class="w-3.5 h-3.5 text-slate-500"></i>
+          </button>
+        </div>`;
+    }
+    icons();
+    const removeBtn = zoneFilled.querySelector(`[data-remove="${slot}"]`);
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (files[slot] && files[slot].previewUrl) URL.revokeObjectURL(files[slot].previewUrl);
+      files[slot] = null;
+      if (slot === "primary") filePrimary.value = "";
+      if (slot === "support") fileSupport.value = "";
+      renderDropzone(slot, zoneEmpty, zoneFilled);
+    });
+  }
+
+  function wireDropzone(zone, input, slot, zoneEmpty, zoneFilled) {
+    input.addEventListener("change", () => handleFile(slot, input.files[0], zoneEmpty, zoneFilled));
+    ["dragenter", "dragover"].forEach((evt) =>
+      zone.addEventListener(evt, (e) => { e.preventDefault(); zone.setAttribute("data-drag", "true"); })
+    );
+    ["dragleave", "drop"].forEach((evt) =>
+      zone.addEventListener(evt, (e) => { e.preventDefault(); zone.setAttribute("data-drag", "false"); })
+    );
+    zone.addEventListener("drop", (e) => {
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(slot, file, zoneEmpty, zoneFilled);
+    });
+  }
+  wireDropzone(dropzonePrimary, filePrimary, "primary", dzPrimaryEmpty, dzPrimaryFilled);
+  wireDropzone(dropzoneSupport, fileSupport, "support", dzSupportEmpty, dzSupportFilled);
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  function saveRecordLocally(row) {
+    try {
+      const storageKey = "fieldcollect.localRecords";
+      const existing = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      const localRow = {
+        ...row,
+        id: Date.now(),
+        created_at: new Date().toISOString(),
+        source: "local"
+      };
+      existing.unshift(localRow);
+      localStorage.setItem(storageKey, JSON.stringify(existing));
+      return localRow;
+    } catch (err) {
+      console.warn("Local save failed:", err);
+      return null;
+    }
+  }
+
+  /* ---------- Reset form ---------- */
+  function resetForm() {
+    fullNameInput.value = "";
+    phoneInput.value = "";
+    fullNameCheck.classList.add("hidden");
+    phoneCheck.classList.add("hidden");
+    currentLocation = null;
+    showGeoState("idle");
+    if (files.primary && files.primary.previewUrl) URL.revokeObjectURL(files.primary.previewUrl);
+    if (files.support && files.support.previewUrl) URL.revokeObjectURL(files.support.previewUrl);
+    files = { primary: null, support: null };
+    renderDropzone("primary", dzPrimaryEmpty, dzPrimaryFilled);
+    renderDropzone("support", dzSupportEmpty, dzSupportFilled);
+  }
+
+  /* ---------- Upload a file to Supabase Storage, return its public URL ---------- */
+  async function uploadFile(slotFile, recordFolder) {
+    if (!slotFile) return null;
+    if (!sb || !sb.storage) return null;
+
+    const safeName = slotFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const path = `${recordFolder}/${Date.now()}_${safeName}`;
+    try {
+      const { error: uploadError } = await sb.storage.from(BUCKET_NAME).upload(path, slotFile.file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (uploadError) return null;
+      const { data: urlData } = sb.storage.from(BUCKET_NAME).getPublicUrl(path);
+      return { url: urlData.publicUrl, name: slotFile.name, type: slotFile.type };
+    } catch (err) {
+      console.warn("Upload skipped:", err);
+      return null;
+    }
+  }
+
+  /* ---------- Submit ---------- */
+  submitBtn.addEventListener("click", async () => {
+    if (isSaving) return;
+    if (!validateAll(true)) {
+      showToast("Please fill in the required fields.");
+      const firstInvalid = fullNameInput.value.trim().length < 2 ? fullNameInput : phoneInput;
+      firstInvalid.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    isSaving = true;
+    submitBtn.disabled = true;
+    submitBtnLabel.textContent = "Saving…";
+
+    try {
+      const recordFolder = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+      const [primaryUpload, supportUpload] = await Promise.all([
+        uploadFile(files.primary, recordFolder),
+        uploadFile(files.support, recordFolder),
+      ]);
+
+      const row = {
+        full_name: fullNameInput.value.trim(),
+        phone: phoneInput.value.trim(),
+        latitude: currentLocation ? currentLocation.lat : null,
+        longitude: currentLocation ? currentLocation.lng : null,
+        accuracy: currentLocation ? currentLocation.accuracy : null,
+        address: currentLocation ? currentLocation.address : null,
+        primary_file_url: primaryUpload ? primaryUpload.url : null,
+        primary_file_name: primaryUpload ? primaryUpload.name : null,
+        primary_file_type: primaryUpload ? primaryUpload.type : null,
+        support_file_url: supportUpload ? supportUpload.url : null,
+        support_file_name: supportUpload ? supportUpload.name : null,
+        support_file_type: supportUpload ? supportUpload.type : null,
+      };
+
+      let saved;
+      if (isDbReady && sb) {
+        try {
+          const { data, error } = await sb.from(TABLE_NAME).insert([row]).select();
+          if (error) {
+            const message = error.message || "unknown error";
+            if (message.toLowerCase().includes("table") || message.toLowerCase().includes("does not exist")) {
+              throw new Error("The database table is missing. Create the records table in Supabase first.");
+            }
+            if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("policy")) {
+              throw new Error("Supabase permissions are blocking inserts. Check your Row Level Security policies.");
+            }
+            throw new Error(message);
+          }
+          saved = data[0];
+          setDbStatus("ok", "Connected");
+        } catch (dbErr) {
+          const safeMessage = getSafeMessage(dbErr, "The database request failed, so the record was saved locally instead.");
+          saved = saveRecordLocally(row);
+          if (saved) {
+            setDbStatus("warn", "Saved locally");
+            showToast("Saved locally: " + safeMessage);
+          } else {
+            throw new Error(safeMessage);
+          }
+        }
+      } else {
+        saved = saveRecordLocally(row);
+        if (saved) {
+          setDbStatus("warn", "Saved locally");
+          showToast("Saved locally because no database is configured yet.");
+        } else {
+          throw new Error("Unable to save locally.");
+        }
+      }
+
+      showConfirmModal(saved, saved && saved.source === "local" ? "local" : "database");
+      resetForm();
+    } catch (err) {
+      console.error(err);
+      const safeMessage = getSafeMessage(err, "The save could not be completed.");
+      showToast("Couldn't save the record: " + safeMessage);
+      setDbStatus("warn", "Save failed");
+    } finally {
+      isSaving = false;
+      submitBtn.disabled = false;
+      submitBtnLabel.textContent = "Save record";
+      icons();
+    }
+  });
+
+  function fmtTimestamp(iso) {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  }
+
+  function showConfirmModal(r, mode = "database") {
+    const isLocal = mode === "local";
+    confirmTitle.textContent = isLocal ? "Record saved locally" : "Record saved to database";
+    confirmSubtitle.textContent = isLocal ? "Your entry is stored on this device for now." : "Here's a summary of what was captured.";
+    confirmSummary.innerHTML = `
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <span class="text-slate-400">Name</span><span class="font-medium text-right">${escapeHtml(r.full_name)}</span>
+      </div>
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <span class="text-slate-400">Phone</span><span class="font-medium font-mono-data text-right">${escapeHtml(r.phone)}</span>
+      </div>
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5 gap-3">
+        <span class="text-slate-400 shrink-0">Location</span><span class="font-medium text-right text-[13px]">${r.latitude != null ? escapeHtml(r.address || (r.latitude.toFixed(4) + ", " + r.longitude.toFixed(4))) : "Not captured"}</span>
+      </div>
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <span class="text-slate-400">Documents</span><span class="font-medium text-right">${(r.primary_file_url ? 1 : 0) + (r.support_file_url ? 1 : 0)} attached</span>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-slate-400">Saved at</span><span class="font-medium font-mono-data text-right text-[12.5px]">${fmtTimestamp(r.created_at)}</span>
+      </div>
+    `;
+    confirmModal.classList.remove("hidden");
+    confirmModal.classList.add("flex");
+    icons();
+  }
+  function closeConfirmModal() {
+    confirmModal.classList.add("hidden");
+    confirmModal.classList.remove("flex");
+  }
+  confirmOverlay.addEventListener("click", closeConfirmModal);
+  confirmCloseBtn.addEventListener("click", closeConfirmModal);
+  confirmViewBtn.addEventListener("click", () => { closeConfirmModal(); setTab("records"); });
+
+  /* ---------- Fetch + render records from the database ---------- */
+  async function fetchRecords() {
+    if (!isConfigured || !sb) {
+      recordsLoading.classList.add("hidden"); recordsLoading.classList.remove("flex");
+      recordsList.innerHTML = "";
+      recordsEmpty.classList.add("hidden");
+      recordsNoMatch.classList.add("hidden");
+      recordsFetchError.classList.remove("hidden"); recordsFetchError.classList.add("flex");
+      recordsFetchError.querySelector("p.font-display").textContent = "Database not connected";
+      recordsFetchError.querySelector("p.text-slate-400").textContent = "Add your Supabase credentials in the script to load records.";
+      icons();
+      return;
+    }
+    recordsList.innerHTML = "";
+    recordsEmpty.classList.add("hidden");
+    recordsNoMatch.classList.add("hidden");
+    recordsFetchError.classList.add("hidden"); recordsFetchError.classList.remove("flex");
+    recordsLoading.classList.remove("hidden"); recordsLoading.classList.add("flex");
+    icons();
+
+    try {
+      const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      records = data || [];
+      recordsCount.textContent = records.length;
+      setDbStatus("ok", "Connected");
+      renderRecords();
+    } catch (err) {
+      console.error(err);
+      recordsFetchError.classList.remove("hidden"); recordsFetchError.classList.add("flex");
+      recordsFetchError.querySelector("p.font-display").textContent = "Couldn't load records";
+      recordsFetchError.querySelector("p.text-slate-400").textContent = "Check your connection and database setup, then try again.";
+      setDbStatus("warn", "Connection issue");
+    } finally {
+      recordsLoading.classList.add("hidden"); recordsLoading.classList.remove("flex");
+      icons();
+    }
+  }
+  retryFetchBtn.addEventListener("click", fetchRecords);
+
+  function recordCardHtml(r) {
+    const thumb = r.primary_file_url && r.primary_file_type && r.primary_file_type.startsWith("image/")
+      ? `<img src="${r.primary_file_url}" class="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0" alt="" />`
+      : `<div class="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center shrink-0"><i data-lucide="user-round" class="w-5 h-5 text-slate-400"></i></div>`;
+    const addr = r.latitude != null ? (r.address || `${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}`) : "No location captured";
+    return `
+      <button data-open="${r.id}" class="w-full text-left bg-white rounded-2xl shadow-card border border-slate-100 p-3.5 flex items-center gap-3 active:scale-[0.99] transition-transform">
+        ${thumb}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <p class="font-display font-semibold text-[14px] truncate">${escapeHtml(r.full_name)}</p>
+            <span class="text-[10.5px] text-slate-400 font-mono-data shrink-0">${new Date(r.created_at).toLocaleDateString()}</span>
+          </div>
+          <p class="text-[12.5px] font-mono-data text-slate-500 mt-0.5">${escapeHtml(r.phone)}</p>
+          <p class="text-[12px] text-slate-400 truncate mt-0.5 flex items-center gap-1">
+            <i data-lucide="map-pin" class="w-3 h-3 shrink-0"></i><span class="truncate">${escapeHtml(addr)}</span>
+          </p>
+        </div>
+        <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300 shrink-0"></i>
+      </button>`;
+  }
+
+  function renderRecords() {
+    const q = searchInput.value.trim().toLowerCase();
+    clearSearchBtn.classList.toggle("hidden", q.length === 0);
+    const filtered = q
+      ? records.filter((r) =>
+          r.full_name.toLowerCase().includes(q) ||
+          r.phone.toLowerCase().includes(q) ||
+          (r.address && r.address.toLowerCase().includes(q))
+        )
+      : records;
+
+    recordsCount.textContent = records.length;
+
+    if (records.length === 0) {
+      recordsList.innerHTML = "";
+      recordsEmpty.classList.remove("hidden"); recordsEmpty.classList.add("flex");
+      recordsNoMatch.classList.add("hidden"); recordsNoMatch.classList.remove("flex");
+      return;
+    }
+    recordsEmpty.classList.add("hidden"); recordsEmpty.classList.remove("flex");
+
+    if (filtered.length === 0) {
+      recordsList.innerHTML = "";
+      recordsNoMatch.classList.remove("hidden"); recordsNoMatch.classList.add("flex");
+      return;
+    }
+    recordsNoMatch.classList.add("hidden"); recordsNoMatch.classList.remove("flex");
+
+    recordsList.innerHTML = filtered.map(recordCardHtml).join("");
+    icons();
+    recordsList.querySelectorAll("[data-open]").forEach((btn) => {
+      btn.addEventListener("click", () => openDetail(btn.getAttribute("data-open")));
+    });
+  }
+  searchInput.addEventListener("input", renderRecords);
+  clearSearchBtn.addEventListener("click", () => { searchInput.value = ""; renderRecords(); searchInput.focus(); });
+
+  /* ---------- Detail modal ---------- */
+  function fileBlockHtml(label, url, name, type) {
+    if (!url) return `<div class="bg-slate-50 rounded-xl p-3 border border-slate-100"><p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">${label}</p><p class="text-[13px] text-slate-400">Not attached</p></div>`;
+    const isImage = type && type.startsWith("image/");
+    const preview = isImage
+      ? `<img src="${url}" class="w-full h-32 object-cover rounded-lg mt-2 border border-slate-200" alt="${escapeHtml(name || label)}" />`
+      : `<a href="${url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-2 bg-white rounded-lg border border-slate-200 p-2.5">
+           <i data-lucide="file-text" class="w-4 h-4 text-brand-600"></i>
+           <span class="text-[12.5px] text-slate-600 truncate flex-1">${escapeHtml(name || "Open document")}</span>
+           <i data-lucide="external-link" class="w-3.5 h-3.5 text-slate-400"></i>
+         </a>`;
+    return `<div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+      <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">${label}</p>
+      ${preview}
+    </div>`;
+  }
+
+  function openDetail(id) {
+    const r = records.find((x) => String(x.id) === String(id));
+    if (!r) return;
+    activeDetailId = id;
+    detailContent.innerHTML = `
+      <div class="grid grid-cols-2 gap-2.5">
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
+          <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Full name</p>
+          <p class="font-medium">${escapeHtml(r.full_name)}</p>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
+          <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Phone</p>
+          <p class="font-mono-data font-medium">${escapeHtml(r.phone)}</p>
+        </div>
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
+          <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Location</p>
+          ${r.latitude != null ? `
+            <p class="font-mono-data text-[13px]">${r.latitude.toFixed(6)}, ${r.longitude.toFixed(6)}</p>
+            <p class="text-[12px] text-slate-500 mt-1">±${Math.round(r.accuracy)} m accuracy</p>
+            <p class="text-[13px] text-slate-600 mt-1.5">${escapeHtml(r.address || "Address unavailable")}</p>
+          ` : `<p class="text-[13px] text-slate-400">Not captured</p>`}
+        </div>
+        ${fileBlockHtml("Primary ID / Photo", r.primary_file_url, r.primary_file_name, r.primary_file_type)}
+        ${fileBlockHtml("Supporting document", r.support_file_url, r.support_file_name, r.support_file_type)}
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
+          <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Saved at</p>
+          <p class="font-mono-data text-[13px]">${fmtTimestamp(r.created_at)}</p>
+        </div>
+      </div>
+    `;
+    detailModal.classList.remove("hidden"); detailModal.classList.add("flex");
+    icons();
+  }
+  function closeDetail() { detailModal.classList.add("hidden"); detailModal.classList.remove("flex"); }
+  detailOverlay.addEventListener("click", closeDetail);
+  detailCloseX.addEventListener("click", closeDetail);
+
+  detailDeleteBtn.addEventListener("click", () => {
+    deleteConfirmModal.classList.remove("hidden"); deleteConfirmModal.classList.add("flex");
+  });
+  function closeDeleteConfirm() { deleteConfirmModal.classList.add("hidden"); deleteConfirmModal.classList.remove("flex"); }
+  deleteOverlay.addEventListener("click", closeDeleteConfirm);
+  deleteCancelBtn.addEventListener("click", closeDeleteConfirm);
+  deleteConfirmBtn.addEventListener("click", async () => {
+    if (!sb) return;
+    try {
+      const { error } = await sb.from(TABLE_NAME).delete().eq("id", activeDetailId);
+      if (error) throw error;
+      records = records.filter((x) => String(x.id) !== String(activeDetailId));
+      recordsCount.textContent = records.length;
+      closeDeleteConfirm();
+      closeDetail();
+      renderRecords();
+      showToast("Record deleted from the database.");
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't delete: " + (err.message || "unknown error"));
+    }
+  });
+
+  /* ---------- Init: verify DB connection ---------- */
+  async function checkConnection() {
+    if (!isConfigured || !sb) return;
+    try {
+      const { error } = await sb.from(TABLE_NAME).select("id", { count: "exact", head: true });
+      if (error) throw error;
+      setDbStatus("ok", "Connected");
+      setupBanner.classList.add("hidden");
+    } catch (err) {
+      console.error(err);
+      setDbStatus("warn", "Table not found — check setup");
+      setupBanner.classList.remove("hidden");
+      const setupTextNodes = setupBanner.querySelectorAll("p");
+      if (setupTextNodes[0]) setupTextNodes[0].textContent = "Database table not found";
+      if (setupTextNodes[1]) setupTextNodes[1].textContent = "Your Supabase credentials look connected, but the '" + TABLE_NAME + "' table couldn't be reached. Run the SQL schema from the setup notes in your project's SQL editor.";
+    }
+  }
+
+  showGeoState("idle");
+  icons();
+  checkConnection();
+})();
+</script>
+</body>
+</html>
