@@ -437,9 +437,6 @@
   function applySupabaseConfig(url, key) {
     SUPABASE_URL = (url || "https://smoddkipxnrouuqzgdxk.supabase.co").trim();
     SUPABASE_ANON_KEY = (key || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtb2Rka2lweG5yb3V1cXpnZHhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MDc5NjIsImV4cCI6MjEwMDI4Mzk2Mn0.4S5pxqpd7ztj6YrcClIZVZs2_B2Ah_vLIT_AM5TbuQQ").trim();
-    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-      
-    }
     return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && isValidHttpUrl(SUPABASE_URL);
   }
 // Force the UI status to show connected
@@ -461,8 +458,10 @@ document.addEventListener("DOMContentLoaded", () => {
     isDbReady = false;
     if (isConfigured && window.supabase) {
       sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      isDbReady = true;
     } else {
       sb = null;
+      isDbReady = false;
     }
   }
 
@@ -561,6 +560,28 @@ document.addEventListener("DOMContentLoaded", () => {
       return fallback;
     }
     return compact.length > 140 ? compact.slice(0, 137) + "..." : compact;
+  }
+
+  async function saveRecordToSupabase(row) {
+    if (!sb) return { ok: false, reason: "No Supabase client" };
+
+    try {
+      const { data, error } = await sb.from(TABLE_NAME).insert([row]).select();
+      if (error) {
+        const message = error.message || "unknown error";
+        if (message.toLowerCase().includes("table") || message.toLowerCase().includes("does not exist")) {
+          return { ok: false, reason: "The database table is missing. Create the records table in Supabase first." };
+        }
+        if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("policy")) {
+          return { ok: false, reason: "Supabase permissions are blocking inserts. Check your Row Level Security policies." };
+        }
+        return { ok: false, reason: message };
+      }
+
+      return { ok: true, data: data && data[0] ? data[0] : null };
+    } catch (err) {
+      return { ok: false, reason: getSafeMessage(err, "The database insert failed.") };
+    }
   }
 
   /* ---------- Supabase connection ---------- */
@@ -981,38 +1002,19 @@ document.addEventListener("DOMContentLoaded", () => {
       };
 
       let saved;
-      if (isDbReady && sb) {
-        try {
-          const { data, error } = await sb.from(TABLE_NAME).insert([row]).select();
-          if (error) {
-            const message = error.message || "unknown error";
-            if (message.toLowerCase().includes("table") || message.toLowerCase().includes("does not exist")) {
-              throw new Error("The database table is missing. Create the records table in Supabase first.");
-            }
-            if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("policy")) {
-              throw new Error("Supabase permissions are blocking inserts. Check your Row Level Security policies.");
-            }
-            throw new Error(message);
-          }
-          saved = data[0];
-          setDbStatus("ok", "Connected");
-        } catch (dbErr) {
-          const safeMessage = getSafeMessage(dbErr, "The database request failed, so the record was saved locally instead.");
-          saved = saveRecordLocally(row);
-          if (saved) {
-            setDbStatus("warn", "Saved locally");
-            showToast("Saved locally: " + safeMessage);
-          } else {
-            throw new Error(safeMessage);
-          }
-        }
+      const remoteResult = await saveRecordToSupabase(row);
+      if (remoteResult.ok) {
+        saved = remoteResult.data || { ...row, created_at: new Date().toISOString(), source: "database" };
+        setDbStatus("ok", "Connected");
+        showToast("Saved to Supabase database.");
       } else {
+        const safeMessage = getSafeMessage(remoteResult.reason, "The database insert failed, so the record was saved locally instead.");
         saved = saveRecordLocally(row);
         if (saved) {
           setDbStatus("warn", "Saved locally");
-          showToast("Saved locally because no database is configured yet.");
+          showToast("Saved locally: " + safeMessage);
         } else {
-          throw new Error("Unable to save locally.");
+          throw new Error(safeMessage);
         }
       }
 
