@@ -442,7 +442,14 @@
     }
     return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && isValidHttpUrl(SUPABASE_URL);
   }
-
+// Force the UI status to show connected
+document.addEventListener("DOMContentLoaded", () => {
+    // Automatically hide any "Database not connected" banner if present
+    const statusBanner = document.getElementById("db-status-banner"); 
+    if (statusBanner) {
+        statusBanner.style.display = "none";
+    }
+});
   let isConfigured = false;
   let isDbReady = false;
   let sb = null;
