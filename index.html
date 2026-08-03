@@ -544,6 +544,9 @@
   let files = { primary: null, support: null }; // { file: File, name, size, type, previewUrl }
   let isSaving = false;
   let activeDetailId = null;
+  const GEO_TARGET_ACCURACY = 5;
+  const GEO_MAX_ATTEMPTS = 4;
+  const GEO_RETRY_DELAY_MS = 1500;
 
   /* ---------- Elements ---------- */
   const $ = (id) => document.getElementById(id);
@@ -1045,31 +1048,55 @@
     }
 
     showGeoState("loading");
+    accuracyNote.textContent = "Holding still and improving the GPS fix…";
+    accuracyVal.textContent = "—";
+    latVal.textContent = "—";
+    lngVal.textContent = "—";
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const accuracy = position.coords.accuracy;
-
-        currentLocation = { lat, lng, accuracy, address: null };
-        showGeoState("success");
-        renderLocation();
-        reverseGeocode(lat, lng);
-      },
-      async (error) => {
-        console.warn("Geolocation Error:", error);
-        const fallbackWorked = await tryIpFallback();
-        if (!fallbackWorked) {
-          await useDemoLocation();
-        }
-      },
-      {
+    const tryAcquire = () => new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 8000,
         maximumAge: 0
+      });
+    });
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= GEO_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const position = await tryAcquire();
+        const lat = Number(position.coords.latitude);
+        const lng = Number(position.coords.longitude);
+        const accuracy = Number(position.coords.accuracy);
+
+        if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(accuracy) && accuracy <= GEO_TARGET_ACCURACY) {
+          currentLocation = { lat, lng, accuracy, address: null };
+          showGeoState("success");
+          renderLocation();
+          reverseGeocode(lat, lng);
+          return;
+        }
+
+        lastError = new Error(`Accuracy ${Math.round(accuracy)}m`);
+        if (attempt < GEO_MAX_ATTEMPTS) {
+          accuracyNote.textContent = `Still refining GPS… attempt ${attempt}/${GEO_MAX_ATTEMPTS}`;
+          await new Promise((resolve) => setTimeout(resolve, GEO_RETRY_DELAY_MS));
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt < GEO_MAX_ATTEMPTS) {
+          accuracyNote.textContent = `Retrying GPS lock… attempt ${attempt}/${GEO_MAX_ATTEMPTS}`;
+          await new Promise((resolve) => setTimeout(resolve, GEO_RETRY_DELAY_MS));
+        }
       }
-    );
+    }
+
+    currentLocation = null;
+    showGeoState("error");
+    geoErrorTitle.textContent = "GPS accuracy too low";
+    geoErrorMsg.textContent = "Move to an open area, stand still, and try again. We need a location within 5 meters.";
+    accuracyNote.textContent = "Need a stronger GPS fix.";
+    console.warn("Geolocation did not reach the 5m target:", lastError);
   }
 
   function renderLocation() {
@@ -1081,15 +1108,15 @@
     accuracyVal.textContent = acc + " m";
     const pct = Math.max(4, Math.min(100, 100 - Math.min(acc, 100)));
     accuracyBar.style.width = pct + "%";
-    if (acc <= 15) {
+    if (acc <= GEO_TARGET_ACCURACY) {
       accuracyBar.className = "h-full rounded-full bg-signal-500 transition-all duration-500";
-      accuracyNote.textContent = "Excellent precision for this reading.";
-    } else if (acc <= 50) {
+      accuracyNote.textContent = "Target achieved — within 5 meters.";
+    } else if (acc <= 15) {
       accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
       accuracyNote.textContent = "Good precision — usable for most records.";
     } else if (acc <= 1500) {
       accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
-      accuracyNote.textContent = "Fallback location — approximate city-level accuracy.";
+      accuracyNote.textContent = "Need a stronger GPS fix; move to open sky and hold still.";
     } else {
       accuracyBar.className = "h-full rounded-full bg-alert-500 transition-all duration-500";
       accuracyNote.textContent = "Low precision — consider moving to open sky and re-acquiring.";
@@ -1264,6 +1291,11 @@
       return;
     }
 
+    if (!currentLocation || !Number.isFinite(currentLocation.accuracy) || Number(currentLocation.accuracy) > GEO_TARGET_ACCURACY) {
+      showToast("Location accuracy must be 5 meters or better. Re-acquire your position and try again.");
+      return;
+    }
+
     isSaving = true;
     submitBtn.disabled = true;
     submitBtnLabel.textContent = "Saving…";
@@ -1301,12 +1333,14 @@
       const remoteResult = await saveRecordToSupabase(row);
       if (remoteResult.ok) {
         saved = remoteResult.data || { ...row, created_at: new Date().toISOString(), source: "database" };
+        localStorage.setItem("fieldcollect.lastRecordSavedAt", String(Date.now()));
         setDbStatus("ok", "Connected");
         showToast("Saved to Supabase database.");
       } else {
         const safeMessage = getSafeMessage(remoteResult.reason, "The database insert failed, so the record was saved locally instead.");
         saved = saveRecordLocally(row);
         if (saved) {
+          localStorage.setItem("fieldcollect.lastRecordSavedAt", String(Date.now()));
           setDbStatus("warn", "Saved locally");
           showToast("Saved locally: " + safeMessage);
         } else {
