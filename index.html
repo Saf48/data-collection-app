@@ -389,6 +389,11 @@
       <label for="gisLayerInput" class="block text-xs font-medium text-slate-600">Upload GIS layer (.zip shapefile)</label>
       <input id="gisLayerInput" type="file" accept=".zip" class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700" />
       <div class="flex flex-wrap gap-2">
+        <button id="drawPolygonBtn" type="button" class="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-700">Draw polygon</button>
+        <button id="clearSelectionBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Clear selection</button>
+      </div>
+      <p id="selectionSummary" class="text-[12px] text-slate-500">No polygon selected yet.</p>
+      <div class="flex flex-wrap gap-2">
         <button id="exportKmlBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KML (Google Earth)</button>
         <button id="exportKmzBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KMZ</button>
         <button id="exportTxtBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .TXT (Tab-Delimited Coordinates)</button>
@@ -544,9 +549,6 @@
   let files = { primary: null, support: null }; // { file: File, name, size, type, previewUrl }
   let isSaving = false;
   let activeDetailId = null;
-  const GEO_TARGET_ACCURACY = 5;
-  const GEO_MAX_ATTEMPTS = 4;
-  const GEO_RETRY_DELAY_MS = 1500;
 
   /* ---------- Elements ---------- */
   const $ = (id) => document.getElementById(id);
@@ -641,6 +643,9 @@
     if (adminLogoutBtn) adminLogoutBtn.classList.toggle("hidden", !isLoggedIn);
     if (managementSection) managementSection.classList.toggle("hidden", !isLoggedIn);
     if (adminStatus) adminStatus.textContent = isLoggedIn ? `Signed in as ${session.email}` : "Create your first admin account to unlock the dashboard.";
+    if (isLoggedIn) {
+      setTimeout(() => initializeManagementDashboard(true), 220);
+    }
   }
 
   function createAdminAccount() {
@@ -1048,55 +1053,31 @@
     }
 
     showGeoState("loading");
-    accuracyNote.textContent = "Holding still and improving the GPS fix…";
-    accuracyVal.textContent = "—";
-    latVal.textContent = "—";
-    lngVal.textContent = "—";
 
-    const tryAcquire = () => new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+
+        currentLocation = { lat, lng, accuracy, address: null };
+        showGeoState("success");
+        renderLocation();
+        reverseGeocode(lat, lng);
+      },
+      async (error) => {
+        console.warn("Geolocation Error:", error);
+        const fallbackWorked = await tryIpFallback();
+        if (!fallbackWorked) {
+          await useDemoLocation();
+        }
+      },
+      {
         enableHighAccuracy: true,
-        timeout: 8000,
+        timeout: 10000,
         maximumAge: 0
-      });
-    });
-
-    let lastError = null;
-    for (let attempt = 1; attempt <= GEO_MAX_ATTEMPTS; attempt += 1) {
-      try {
-        const position = await tryAcquire();
-        const lat = Number(position.coords.latitude);
-        const lng = Number(position.coords.longitude);
-        const accuracy = Number(position.coords.accuracy);
-
-        if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(accuracy) && accuracy <= GEO_TARGET_ACCURACY) {
-          currentLocation = { lat, lng, accuracy, address: null };
-          showGeoState("success");
-          renderLocation();
-          reverseGeocode(lat, lng);
-          return;
-        }
-
-        lastError = new Error(`Accuracy ${Math.round(accuracy)}m`);
-        if (attempt < GEO_MAX_ATTEMPTS) {
-          accuracyNote.textContent = `Still refining GPS… attempt ${attempt}/${GEO_MAX_ATTEMPTS}`;
-          await new Promise((resolve) => setTimeout(resolve, GEO_RETRY_DELAY_MS));
-        }
-      } catch (error) {
-        lastError = error;
-        if (attempt < GEO_MAX_ATTEMPTS) {
-          accuracyNote.textContent = `Retrying GPS lock… attempt ${attempt}/${GEO_MAX_ATTEMPTS}`;
-          await new Promise((resolve) => setTimeout(resolve, GEO_RETRY_DELAY_MS));
-        }
       }
-    }
-
-    currentLocation = null;
-    showGeoState("error");
-    geoErrorTitle.textContent = "GPS accuracy too low";
-    geoErrorMsg.textContent = "Move to an open area, stand still, and try again. We need a location within 5 meters.";
-    accuracyNote.textContent = "Need a stronger GPS fix.";
-    console.warn("Geolocation did not reach the 5m target:", lastError);
+    );
   }
 
   function renderLocation() {
@@ -1108,15 +1089,15 @@
     accuracyVal.textContent = acc + " m";
     const pct = Math.max(4, Math.min(100, 100 - Math.min(acc, 100)));
     accuracyBar.style.width = pct + "%";
-    if (acc <= GEO_TARGET_ACCURACY) {
+    if (acc <= 15) {
       accuracyBar.className = "h-full rounded-full bg-signal-500 transition-all duration-500";
-      accuracyNote.textContent = "Target achieved — within 5 meters.";
-    } else if (acc <= 15) {
+      accuracyNote.textContent = "Excellent precision for this reading.";
+    } else if (acc <= 50) {
       accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
       accuracyNote.textContent = "Good precision — usable for most records.";
     } else if (acc <= 1500) {
       accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
-      accuracyNote.textContent = "Need a stronger GPS fix; move to open sky and hold still.";
+      accuracyNote.textContent = "Fallback location — approximate city-level accuracy.";
     } else {
       accuracyBar.className = "h-full rounded-full bg-alert-500 transition-all duration-500";
       accuracyNote.textContent = "Low precision — consider moving to open sky and re-acquiring.";
@@ -1291,11 +1272,6 @@
       return;
     }
 
-    if (!currentLocation || !Number.isFinite(currentLocation.accuracy) || Number(currentLocation.accuracy) > GEO_TARGET_ACCURACY) {
-      showToast("Location accuracy must be 5 meters or better. Re-acquire your position and try again.");
-      return;
-    }
-
     isSaving = true;
     submitBtn.disabled = true;
     submitBtnLabel.textContent = "Saving…";
@@ -1333,14 +1309,12 @@
       const remoteResult = await saveRecordToSupabase(row);
       if (remoteResult.ok) {
         saved = remoteResult.data || { ...row, created_at: new Date().toISOString(), source: "database" };
-        localStorage.setItem("fieldcollect.lastRecordSavedAt", String(Date.now()));
         setDbStatus("ok", "Connected");
         showToast("Saved to Supabase database.");
       } else {
         const safeMessage = getSafeMessage(remoteResult.reason, "The database insert failed, so the record was saved locally instead.");
         saved = saveRecordLocally(row);
         if (saved) {
-          localStorage.setItem("fieldcollect.lastRecordSavedAt", String(Date.now()));
           setDbStatus("warn", "Saved locally");
           showToast("Saved locally: " + safeMessage);
         } else {
@@ -1612,7 +1586,124 @@
   let managementMap = null;
   let managementMarkersLayer = null;
   let managementOverlayLayer = null;
+  let managementSelectionLayer = null;
   let managementRecords = [];
+  let managementRefreshTimer = null;
+  let managementSelectionMode = false;
+  let managementSelectionVertices = [];
+  let managementSelectionPolygonLayer = null;
+  let managementSelectedRecords = [];
+
+  function startManagementAutoRefresh() {
+    if (managementRefreshTimer) clearInterval(managementRefreshTimer);
+    managementRefreshTimer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadMapRecords();
+      }
+    }, 10000);
+
+    window.addEventListener("storage", (event) => {
+      if (event.key === "fieldcollect.lastRecordSavedAt") {
+        loadMapRecords();
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        loadMapRecords();
+      }
+    });
+  }
+
+  function updateSelectionSummary() {
+    const summaryEl = $("selectionSummary");
+    if (!summaryEl) return;
+    if (managementSelectedRecords.length) {
+      summaryEl.textContent = `${managementSelectedRecords.length} saved GPS point${managementSelectedRecords.length === 1 ? "" : "s"} selected by the polygon.`;
+    } else if (managementSelectionMode) {
+      summaryEl.textContent = "Click the map to add polygon points. Double-click to finish.";
+    } else {
+      summaryEl.textContent = "No polygon selected yet.";
+    }
+  }
+
+  function clearPolygonSelection() {
+    managementSelectionMode = false;
+    managementSelectionVertices = [];
+    managementSelectedRecords = [];
+    if (managementSelectionLayer) managementSelectionLayer.clearLayers();
+    managementSelectionPolygonLayer = null;
+    if ($("drawPolygonBtn")) $("drawPolygonBtn").textContent = "Draw polygon";
+    updateSelectionSummary();
+  }
+
+  function isPointInPolygon(lat, lng, polygonPoints) {
+    const points = polygonPoints.map((pt) => [pt.lat, pt.lng]);
+    if (points.length < 3) return false;
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const [xi, yi] = points[i];
+      const [xj, yj] = points[j];
+      const intersect = ((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi) / (yj - yi) + xi));
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function redrawSelectionOverlay() {
+    if (!managementSelectionLayer) return;
+    managementSelectionLayer.clearLayers();
+    if (!managementSelectionVertices.length) return;
+
+    const vertices = managementSelectionVertices;
+    const closed = [...vertices, vertices[0]];
+    managementSelectionPolygonLayer = window.L.polygon(closed, {
+      color: "#2563eb",
+      fillColor: "#60a5fa",
+      fillOpacity: 0.18,
+      weight: 2
+    }).addTo(managementSelectionLayer);
+
+    vertices.forEach((vertex, index) => {
+      const marker = window.L.circleMarker(vertex, {
+        radius: 4,
+        color: "#2563eb",
+        fillColor: "#ffffff",
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(managementSelectionLayer);
+      marker.bindTooltip(`Point ${index + 1}`);
+    });
+  }
+
+  function startPolygonSelection() {
+    clearPolygonSelection();
+    managementSelectionMode = true;
+    if ($("drawPolygonBtn")) $("drawPolygonBtn").textContent = "Finish polygon";
+    updateSelectionSummary();
+    showToast("Click the map to add polygon points. Double-click to finish.");
+  }
+
+  function finishPolygonSelection() {
+    if (managementSelectionVertices.length < 3) {
+      showToast("Draw at least 3 points to create a polygon.");
+      return;
+    }
+
+    managementSelectedRecords = managementRecords.filter((record) => {
+      const lat = Number(record.latitude);
+      const lng = Number(record.longitude);
+      return Number.isFinite(lat) && Number.isFinite(lng) && isPointInPolygon(lat, lng, managementSelectionVertices);
+    });
+    managementSelectionMode = false;
+    redrawSelectionOverlay();
+    updateSelectionSummary();
+    if (!managementSelectedRecords.length) {
+      showToast("No saved GPS points were inside that polygon.");
+    } else {
+      showToast(`${managementSelectedRecords.length} saved GPS points selected.`);
+    }
+  }
 
   function initManagementMap() {
     if (!window.L || !$("map")) return;
@@ -1637,26 +1728,54 @@
     satelliteLayer.addTo(managementMap);
     managementMarkersLayer = window.L.layerGroup().addTo(managementMap);
     managementOverlayLayer = window.L.layerGroup().addTo(managementMap);
-    window.L.control.layers({ "OpenStreetMap": osmLayer, "Satellite": satelliteLayer }, { "Saved pins": managementMarkersLayer, "GIS overlay": managementOverlayLayer }).addTo(managementMap);
+    managementSelectionLayer = window.L.layerGroup().addTo(managementMap);
+    window.L.control.layers({ "OpenStreetMap": osmLayer, "Satellite": satelliteLayer }, { "Saved pins": managementMarkersLayer, "GIS overlay": managementOverlayLayer, "Selection": managementSelectionLayer }).addTo(managementMap);
+    managementMap.on("click", (event) => {
+      if (!managementSelectionMode) return;
+      managementSelectionVertices.push(event.latlng);
+      redrawSelectionOverlay();
+      updateSelectionSummary();
+    });
+    managementMap.on("dblclick", (event) => {
+      if (!managementSelectionMode) return;
+      event.originalEvent.preventDefault();
+      event.originalEvent.stopPropagation();
+      finishPolygonSelection();
+    });
     setTimeout(() => managementMap.invalidateSize(), 150);
   }
 
   async function loadMapRecords() {
-    if (!managementMap || !window.L || !sb) return;
+    if (!managementMap || !window.L) return;
     if (managementMarkersLayer) managementMarkersLayer.clearLayers();
     managementRecords = [];
 
     try {
-      const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
-      if (error) throw error;
-      managementRecords = (data || []).filter((record) => Number.isFinite(record.latitude) && Number.isFinite(record.longitude));
+      let rows = [];
+      if (sb) {
+        const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
+        if (error) throw error;
+        rows = data || [];
+      } else {
+        rows = JSON.parse(localStorage.getItem("fieldcollect.localRecords") || "[]");
+      }
+
+      managementRecords = rows.filter((record) => {
+        const lat = Number(record.latitude);
+        const lng = Number(record.longitude);
+        return Number.isFinite(lat) && Number.isFinite(lng);
+      });
+
       managementRecords.forEach((record) => {
         const lat = Number(record.latitude);
         const lng = Number(record.longitude);
         const marker = window.L.marker([lat, lng]).addTo(managementMarkersLayer);
         const address = record.address || "Address unavailable";
-        marker.bindPopup(`<strong>${escapeHtml(record.full_name || "Record")}</strong><br>${escapeHtml(record.phone || "—")}<br>${escapeHtml(address)}`);
+        const name = record.full_name || record.fullName || record.name || "Record";
+        const phone = record.phone || record.phoneNumber || record.contact || "—";
+        marker.bindPopup(`<strong>${escapeHtml(String(name))}</strong><br>${escapeHtml(String(phone))}<br>${escapeHtml(String(address))}`);
       });
+
       if (managementRecords.length && managementMarkersLayer) {
         const group = window.L.featureGroup(managementMarkersLayer.getLayers());
         if (group.getBounds && group.getBounds().isValid()) {
@@ -1701,20 +1820,23 @@
   }
 
   function exportCoordinates(format) {
-    if (!managementRecords.length) {
+    const exportRecords = managementSelectedRecords.length ? managementSelectedRecords : managementRecords;
+    if (!exportRecords.length) {
       showToast("No records available to export.");
       return;
     }
 
+    const filenamePrefix = managementSelectedRecords.length ? "fieldcollect-selected-records" : "fieldcollect-records";
+
     if (format === "kml") {
-      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Records</name>\n${managementRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
-      downloadTextFile("fieldcollect-records.kml", content);
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${filenamePrefix}</name>\n${exportRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile(`${filenamePrefix}.kml`, content);
     } else if (format === "kmz") {
-      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Records</name>\n${managementRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
-      downloadTextFile("fieldcollect-records.kmz", content);
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${filenamePrefix}</name>\n${exportRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile(`${filenamePrefix}.kmz`, content);
     } else {
-      const lines = ["Name\tPhone\tLatitude\tLongitude\tAddress", ...managementRecords.map((record) => `${record.full_name || ""}\t${record.phone || ""}\t${record.latitude ?? ""}\t${record.longitude ?? ""}\t${record.address || ""}`)];
-      downloadTextFile("fieldcollect-records.txt", lines.join("\n"));
+      const lines = ["Name\tPhone\tLatitude\tLongitude\tAddress", ...exportRecords.map((record) => `${record.full_name || ""}\t${record.phone || ""}\t${record.latitude ?? ""}\t${record.longitude ?? ""}\t${record.address || ""}`)];
+      downloadTextFile(`${filenamePrefix}.txt`, lines.join("\n"));
     }
     showToast("Export ready.");
   }
@@ -1722,14 +1844,28 @@
   function bindManagementDashboard() {
     const gisInput = $("gisLayerInput");
     if (gisInput) gisInput.addEventListener("change", overlayGISLayer);
+    $("drawPolygonBtn")?.addEventListener("click", () => {
+      if (managementSelectionMode) {
+        finishPolygonSelection();
+      } else {
+        startPolygonSelection();
+      }
+    });
+    $("clearSelectionBtn")?.addEventListener("click", clearPolygonSelection);
     $("exportKmlBtn")?.addEventListener("click", () => exportCoordinates("kml"));
     $("exportKmzBtn")?.addEventListener("click", () => exportCoordinates("kmz"));
     $("exportTxtBtn")?.addEventListener("click", () => exportCoordinates("txt"));
   }
 
-  function initializeManagementDashboard() {
-    initManagementMap();
+  function initializeManagementDashboard(force = false) {
+    if (!window.L || !$("map")) return;
+    if (!managementMap || force) {
+      initManagementMap();
+    } else {
+      setTimeout(() => managementMap.invalidateSize(), 120);
+    }
     bindManagementDashboard();
+    startManagementAutoRefresh();
     loadMapRecords();
   }
 
