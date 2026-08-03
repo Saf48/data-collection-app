@@ -49,6 +49,9 @@
 
 <!-- Supabase client (CDN, no build step required) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
 
 <style>
   html, body { font-family: 'Inter', sans-serif; background: #f8fafc; }
@@ -60,6 +63,7 @@
   }
   .segment-btn[data-active="true"] { background: #0f172a; color: #fff; }
   .dropzone[data-drag="true"] { border-color: #6366f1; background: #eef2ff; }
+  #management-section .leaflet-container { width: 100%; height: 100%; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   @media (prefers-reduced-motion: reduce) {
@@ -367,6 +371,32 @@
   </section>
 
   <section id="management-section" class="hidden bg-white rounded-2xl shadow-card border border-slate-100 p-4 space-y-3 mx-4 mb-4">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 text-slate-700"></i>
+      </div>
+      <div>
+        <h2 class="font-display font-semibold text-[15px]">Management dashboard</h2>
+        <p class="text-[12px] text-slate-500">Review saved field records on a live map and overlay GIS layers.</p>
+      </div>
+    </div>
+
+    <div class="rounded-xl overflow-hidden border border-slate-200">
+      <div id="map" style="height:400px;"></div>
+    </div>
+
+    <div class="space-y-2">
+      <label for="gisLayerInput" class="block text-xs font-medium text-slate-600">Upload GIS layer (.zip shapefile)</label>
+      <input id="gisLayerInput" type="file" accept=".zip" class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700" />
+      <div class="flex flex-wrap gap-2">
+        <button id="exportKmlBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KML (Google Earth)</button>
+        <button id="exportKmzBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KMZ</button>
+        <button id="exportTxtBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .TXT (Tab-Delimited Coordinates)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Sticky submit bar (Entry view only) ===== -->
   <div id="submitBar" class="fixed bottom-0 left-0 right-0 z-30">
     <div class="max-w-lg mx-auto px-4 pb-4 pt-3 bg-gradient-to-t from-paper via-paper/95 to-transparent">
       <button id="submitBtn" type="button"
@@ -477,20 +507,10 @@
     return Boolean(cleanedUrl && cleanedKey) && isValidHttpUrl(cleanedUrl);
   }
 
-  function getSupabaseCredentials() {
-    const inputUrl = (document.getElementById("supabaseUrlInput")?.value || "").trim();
-    const inputKey = (document.getElementById("supabaseKeyInput")?.value || "").trim();
+  function initializeSupabase() {
     const savedUrl = localStorage.getItem("fieldcollect.supabaseUrl") || "";
     const savedKey = localStorage.getItem("fieldcollect.supabaseAnonKey") || "";
-    return {
-      url: inputUrl || savedUrl || SUPABASE_URL,
-      key: inputKey || savedKey || SUPABASE_ANON_KEY,
-    };
-  }
-
-  function initializeSupabase() {
-    const { url, key } = getSupabaseCredentials();
-    isConfigured = applySupabaseConfig(url, key);
+    isConfigured = applySupabaseConfig(savedUrl, savedKey);
     isDbReady = false;
     sb = null;
     useLocalFallback = !isConfigured;
@@ -603,11 +623,11 @@
   function refreshAdminAccess() {
     const session = getStoredAdminSession();
     const isLoggedIn = Boolean(session && session.email);
-    adminLoginCard.classList.toggle("hidden", isLoggedIn);
-    adminRegisterCard.classList.add("hidden");
-    adminLogoutBtn.classList.toggle("hidden", !isLoggedIn);
-    managementSection.classList.toggle("hidden", !isLoggedIn);
-    adminStatus.textContent = isLoggedIn ? `Signed in as ${session.email}` : "Use the form above to create your first admin account.";
+    if (adminLoginCard) adminLoginCard.classList.toggle("hidden", isLoggedIn);
+    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    if (adminLogoutBtn) adminLogoutBtn.classList.toggle("hidden", !isLoggedIn);
+    if (managementSection) managementSection.classList.toggle("hidden", !isLoggedIn);
+    if (adminStatus) adminStatus.textContent = isLoggedIn ? `Signed in as ${session.email}` : "Create your first admin account to unlock the dashboard.";
   }
 
   function createAdminAccount() {
@@ -615,20 +635,20 @@
     const password = adminRegPasswordInput.value.trim();
     const confirm = adminRegConfirmInput.value.trim();
     if (!email || !password || !confirm) {
-      adminStatus.textContent = "Please enter your email and password.";
+      if (adminStatus) adminStatus.textContent = "Please enter your email and password.";
       return;
     }
     if (password.length < 4) {
-      adminStatus.textContent = "Use at least 4 characters for the password.";
+      if (adminStatus) adminStatus.textContent = "Use at least 4 characters for the password.";
       return;
     }
     if (password !== confirm) {
-      adminStatus.textContent = "Passwords do not match.";
+      if (adminStatus) adminStatus.textContent = "Passwords do not match.";
       return;
     }
     const users = getAdminUsers();
     if (users.some((user) => user.email === email)) {
-      adminStatus.textContent = "That admin email already exists.";
+      if (adminStatus) adminStatus.textContent = "That admin email already exists.";
       return;
     }
     users.push({ email, password: btoa(password) });
@@ -636,9 +656,9 @@
     adminRegEmailInput.value = "";
     adminRegPasswordInput.value = "";
     adminRegConfirmInput.value = "";
-    adminStatus.textContent = "Admin account created. Please sign in.";
-    adminRegisterCard.classList.add("hidden");
-    adminLoginCard.classList.remove("hidden");
+    if (adminStatus) adminStatus.textContent = "Admin account created. Please sign in.";
+    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    if (adminLoginCard) adminLoginCard.classList.remove("hidden");
   }
 
   function loginAdmin() {
@@ -647,7 +667,7 @@
     const users = getAdminUsers();
     const match = users.find((user) => user.email === email);
     if (!match || match.password !== btoa(password)) {
-      adminStatus.textContent = "Invalid admin email or password.";
+      if (adminStatus) adminStatus.textContent = "Invalid admin email or password.";
       return;
     }
     persistAdminSession({ email });
@@ -732,98 +752,32 @@
     return compact.length > 140 ? compact.slice(0, 137) + "..." : compact;
   }
 
-  function getRecordValue(record, keys, fallback = "") {
-    if (!record) return fallback;
-    for (const key of keys) {
-      const value = record[key];
-      if (value !== null && value !== undefined && String(value).trim() !== "") {
-        return value;
-      }
-    }
-    return fallback;
-  }
-
-  function getRecordNumber(record, keys) {
-    const value = getRecordValue(record, keys, null);
-    if (value === null || value === undefined || value === "") return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
-  }
-
-  function buildSupabasePayload(row) {
-    return {
-      full_name: row.full_name,
-      phone: row.phone,
-      latitude: row.latitude,
-      longitude: row.longitude,
-      accuracy: row.accuracy,
-      address: row.address,
-      primary_file_url: row.primary_file_url,
-      primary_file_name: row.primary_file_name,
-      primary_file_type: row.primary_file_type,
-      support_file_url: row.support_file_url,
-      support_file_name: row.support_file_name,
-      support_file_type: row.support_file_type,
-    };
-  }
-
-  function buildFallbackSupabasePayload(row) {
-    return {
-      fullName: row.full_name,
-      phoneNumber: row.phone,
-      lat: row.latitude,
-      lng: row.longitude,
-      accuracy: row.accuracy,
-      location_address: row.address,
-      primary_file_url: row.primary_file_url,
-      primary_file_name: row.primary_file_name,
-      primary_file_type: row.primary_file_type,
-      support_file_url: row.support_file_url,
-      support_file_name: row.support_file_name,
-      support_file_type: row.support_file_type,
-    };
-  }
-
   async function saveRecordToSupabase(row) {
     if (!sb) return { ok: false, reason: "No Supabase client" };
 
-    const payloads = [buildSupabasePayload(row), buildFallbackSupabasePayload(row)];
-
-    for (const payload of payloads) {
-      try {
-        const { data, error } = await sb.from(TABLE_NAME).insert([payload]).select();
-        if (!error) {
-          return { ok: true, data: data && data[0] ? data[0] : null };
-        }
-
+    try {
+      const { data, error } = await sb.from(TABLE_NAME).insert([row]).select();
+      if (error) {
         const message = error.message || "unknown error";
-        const lower = message.toLowerCase();
-        if (lower.includes("table") || lower.includes("does not exist")) {
+        if (message.toLowerCase().includes("table") || message.toLowerCase().includes("does not exist")) {
           return { ok: false, reason: "The database table is missing. Create the records table in Supabase first." };
         }
-        if (lower.includes("permission") || lower.includes("policy")) {
+        if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("policy")) {
           return { ok: false, reason: "Supabase permissions are blocking inserts. Check your Row Level Security policies." };
-        }
-        if (lower.includes("column") && lower.includes("does not exist")) {
-          continue;
-        }
-        return { ok: false, reason: message };
-      } catch (err) {
-        const message = getSafeMessage(err, "The database insert failed.");
-        const lower = message.toLowerCase();
-        if (lower.includes("column") && lower.includes("does not exist")) {
-          continue;
         }
         return { ok: false, reason: message };
       }
-    }
 
-    return { ok: false, reason: "The database schema did not accept the record payload." };
+      return { ok: true, data: data && data[0] ? data[0] : null };
+    } catch (err) {
+      return { ok: false, reason: getSafeMessage(err, "The database insert failed.") };
+    }
   }
 
   /* ---------- Supabase connection ---------- */
   async function connectSupabaseFromForm() {
-    const { url, key } = getSupabaseCredentials();
+    const url = supabaseUrlInput.value.trim();
+    const key = supabaseKeyInput.value.trim();
     if (!url || !key) {
       localStorage.removeItem("fieldcollect.supabaseUrl");
       localStorage.removeItem("fieldcollect.supabaseAnonKey");
@@ -887,14 +841,14 @@
   adminLoginBtn.addEventListener("click", loginAdmin);
   adminRegisterBtn.addEventListener("click", createAdminAccount);
   adminCreateToggleBtn.addEventListener("click", () => {
-    adminLoginCard.classList.add("hidden");
-    adminRegisterCard.classList.remove("hidden");
-    adminStatus.textContent = "Create a new admin account to unlock the dashboard.";
+    if (adminLoginCard) adminLoginCard.classList.add("hidden");
+    if (adminRegisterCard) adminRegisterCard.classList.remove("hidden");
+    if (adminStatus) adminStatus.textContent = "Create a new admin account to unlock the dashboard.";
   });
   adminLoginToggleBtn.addEventListener("click", () => {
-    adminRegisterCard.classList.add("hidden");
-    adminLoginCard.classList.remove("hidden");
-    adminStatus.textContent = "Use your existing admin account to continue.";
+    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    if (adminLoginCard) adminLoginCard.classList.remove("hidden");
+    if (adminStatus) adminStatus.textContent = "Use your existing admin account to continue.";
   });
   adminLogoutBtn.addEventListener("click", () => {
     clearAdminSession();
@@ -1285,15 +1239,11 @@
         setDbStatus("ok", "Connected");
         showToast("Saved to Supabase database.");
       } else {
-        const safeMessage = getSafeMessage(remoteResult.reason, "The database insert failed.");
-        if (!sb || useLocalFallback) {
-          saved = saveRecordLocally(row);
-          if (saved) {
-            setDbStatus("warn", "Saved locally");
-            showToast("Saved locally: " + safeMessage);
-          } else {
-            throw new Error(safeMessage);
-          }
+        const safeMessage = getSafeMessage(remoteResult.reason, "The database insert failed, so the record was saved locally instead.");
+        saved = saveRecordLocally(row);
+        if (saved) {
+          setDbStatus("warn", "Saved locally");
+          showToast("Saved locally: " + safeMessage);
         } else {
           throw new Error(safeMessage);
         }
@@ -1321,23 +1271,17 @@
 
   function showConfirmModal(r, mode = "database") {
     const isLocal = mode === "local";
-    const nameText = getRecordValue(r, ["full_name", "fullName", "name", "respondent_name"], "Not provided");
-    const phoneText = getRecordValue(r, ["phone", "phoneNumber", "contact", "phone_number"], "Not provided");
-    const latitude = getRecordNumber(r, ["latitude", "lat", "location_lat"]);
-    const longitude = getRecordNumber(r, ["longitude", "lng", "location_lng"]);
-    const addressText = getRecordValue(r, ["address", "location_address", "location", "address_text"], "Not captured");
-    const locationText = latitude != null && longitude != null ? addressText === "Not captured" ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` : addressText : "Not captured";
     confirmTitle.textContent = isLocal ? "Record saved locally" : "Record saved to database";
     confirmSubtitle.textContent = isLocal ? "Your entry is stored on this device for now." : "Here's a summary of what was captured.";
     confirmSummary.innerHTML = `
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-        <span class="text-slate-400">Name</span><span class="font-medium text-right">${escapeHtml(String(nameText))}</span>
+        <span class="text-slate-400">Name</span><span class="font-medium text-right">${escapeHtml(r.full_name)}</span>
       </div>
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-        <span class="text-slate-400">Phone</span><span class="font-medium font-mono-data text-right">${escapeHtml(String(phoneText))}</span>
+        <span class="text-slate-400">Phone</span><span class="font-medium font-mono-data text-right">${escapeHtml(r.phone)}</span>
       </div>
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5 gap-3">
-        <span class="text-slate-400 shrink-0">Location</span><span class="font-medium text-right text-[13px]">${escapeHtml(String(locationText))}</span>
+        <span class="text-slate-400 shrink-0">Location</span><span class="font-medium text-right text-[13px]">${r.latitude != null ? escapeHtml(r.address || (r.latitude.toFixed(4) + ", " + r.longitude.toFixed(4))) : "Not captured"}</span>
       </div>
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <span class="text-slate-400">Documents</span><span class="font-medium text-right">${(r.primary_file_url ? 1 : 0) + (r.support_file_url ? 1 : 0)} attached</span>
@@ -1410,21 +1354,16 @@
     const thumb = r.primary_file_url && r.primary_file_type && r.primary_file_type.startsWith("image/")
       ? `<img src="${r.primary_file_url}" class="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0" alt="" />`
       : `<div class="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center shrink-0"><i data-lucide="user-round" class="w-5 h-5 text-slate-400"></i></div>`;
-    const displayName = getRecordValue(r, ["full_name", "fullName", "name", "respondent_name"], "Unnamed record");
-    const displayPhone = getRecordValue(r, ["phone", "phoneNumber", "contact", "phone_number"], "No phone");
-    const latitude = getRecordNumber(r, ["latitude", "lat", "location_lat"]);
-    const longitude = getRecordNumber(r, ["longitude", "lng", "location_lng"]);
-    const addressValue = getRecordValue(r, ["address", "location_address", "location", "address_text"], "");
-    const addr = latitude != null && longitude != null ? (addressValue || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`) : "No location captured";
+    const addr = r.latitude != null ? (r.address || `${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}`) : "No location captured";
     return `
       <button data-open="${r.id}" class="w-full text-left bg-white rounded-2xl shadow-card border border-slate-100 p-3.5 flex items-center gap-3 active:scale-[0.99] transition-transform">
         ${thumb}
         <div class="min-w-0 flex-1">
           <div class="flex items-center justify-between gap-2">
-            <p class="font-display font-semibold text-[14px] truncate">${escapeHtml(String(displayName))}</p>
+            <p class="font-display font-semibold text-[14px] truncate">${escapeHtml(r.full_name)}</p>
             <span class="text-[10.5px] text-slate-400 font-mono-data shrink-0">${new Date(r.created_at).toLocaleDateString()}</span>
           </div>
-          <p class="text-[12.5px] font-mono-data text-slate-500 mt-0.5">${escapeHtml(String(displayPhone))}</p>
+          <p class="text-[12.5px] font-mono-data text-slate-500 mt-0.5">${escapeHtml(r.phone)}</p>
           <p class="text-[12px] text-slate-400 truncate mt-0.5 flex items-center gap-1">
             <i data-lucide="map-pin" class="w-3 h-3 shrink-0"></i><span class="truncate">${escapeHtml(addr)}</span>
           </p>
@@ -1437,12 +1376,11 @@
     const q = searchInput.value.trim().toLowerCase();
     clearSearchBtn.classList.toggle("hidden", q.length === 0);
     const filtered = q
-      ? records.filter((r) => {
-          const name = String(getRecordValue(r, ["full_name", "fullName", "name", "respondent_name"], "")).toLowerCase();
-          const phone = String(getRecordValue(r, ["phone", "phoneNumber", "contact", "phone_number"], "")).toLowerCase();
-          const address = String(getRecordValue(r, ["address", "location_address", "location", "address_text"], "")).toLowerCase();
-          return name.includes(q) || phone.includes(q) || address.includes(q);
-        })
+      ? records.filter((r) =>
+          r.full_name.toLowerCase().includes(q) ||
+          r.phone.toLowerCase().includes(q) ||
+          (r.address && r.address.toLowerCase().includes(q))
+        )
       : records;
 
     recordsCount.textContent = records.length;
@@ -1492,28 +1430,22 @@
     const r = records.find((x) => String(x.id) === String(id));
     if (!r) return;
     activeDetailId = id;
-    const displayName = getRecordValue(r, ["full_name", "fullName", "name", "respondent_name"], "Unnamed record");
-    const displayPhone = getRecordValue(r, ["phone", "phoneNumber", "contact", "phone_number"], "No phone");
-    const latitude = getRecordNumber(r, ["latitude", "lat", "location_lat"]);
-    const longitude = getRecordNumber(r, ["longitude", "lng", "location_lng"]);
-    const accuracy = getRecordNumber(r, ["accuracy", "location_accuracy"]);
-    const addressValue = getRecordValue(r, ["address", "location_address", "location", "address_text"], "");
     detailContent.innerHTML = `
       <div class="grid grid-cols-2 gap-2.5">
         <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
           <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Full name</p>
-          <p class="font-medium">${escapeHtml(String(displayName))}</p>
+          <p class="font-medium">${escapeHtml(r.full_name)}</p>
         </div>
         <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
           <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Phone</p>
-          <p class="font-mono-data font-medium">${escapeHtml(String(displayPhone))}</p>
+          <p class="font-mono-data font-medium">${escapeHtml(r.phone)}</p>
         </div>
         <div class="bg-slate-50 rounded-xl p-3 border border-slate-100 col-span-2">
           <p class="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Location</p>
-          ${latitude != null && longitude != null ? `
-            <p class="font-mono-data text-[13px]">${latitude.toFixed(6)}, ${longitude.toFixed(6)}</p>
-            <p class="text-[12px] text-slate-500 mt-1">${accuracy != null ? `±${Math.round(accuracy)} m accuracy` : "Accuracy unavailable"}</p>
-            <p class="text-[13px] text-slate-600 mt-1.5">${escapeHtml(addressValue || "Address unavailable")}</p>
+          ${r.latitude != null ? `
+            <p class="font-mono-data text-[13px]">${r.latitude.toFixed(6)}, ${r.longitude.toFixed(6)}</p>
+            <p class="text-[12px] text-slate-500 mt-1">±${Math.round(r.accuracy)} m accuracy</p>
+            <p class="text-[13px] text-slate-600 mt-1.5">${escapeHtml(r.address || "Address unavailable")}</p>
           ` : `<p class="text-[13px] text-slate-400">Not captured</p>`}
         </div>
         ${fileBlockHtml("Primary ID / Photo", r.primary_file_url, r.primary_file_name, r.primary_file_type)}
@@ -1577,6 +1509,136 @@
   showGeoState("idle");
   icons();
   checkConnection();
+
+  let managementMap = null;
+  let managementMarkersLayer = null;
+  let managementOverlayLayer = null;
+  let managementRecords = [];
+
+  function initManagementMap() {
+    if (!window.L || !$("map")) return;
+    const mapEl = $("map");
+    if (!mapEl) return;
+    if (managementMap) {
+      managementMap.remove();
+      managementMap = null;
+    }
+
+    const osmLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    });
+    const satelliteLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 19,
+      attribution: "Tiles &copy; Esri"
+    });
+
+    managementMap = window.L.map("map", { zoomControl: true, scrollWheelZoom: true }).setView([5.6037, -0.1870], 6);
+    osmLayer.addTo(managementMap);
+    satelliteLayer.addTo(managementMap);
+    managementMarkersLayer = window.L.layerGroup().addTo(managementMap);
+    managementOverlayLayer = window.L.layerGroup().addTo(managementMap);
+    window.L.control.layers({ "OpenStreetMap": osmLayer, "Satellite": satelliteLayer }, { "Saved pins": managementMarkersLayer, "GIS overlay": managementOverlayLayer }).addTo(managementMap);
+    setTimeout(() => managementMap.invalidateSize(), 150);
+  }
+
+  async function loadMapRecords() {
+    if (!managementMap || !window.L || !sb) return;
+    if (managementMarkersLayer) managementMarkersLayer.clearLayers();
+    managementRecords = [];
+
+    try {
+      const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      managementRecords = (data || []).filter((record) => Number.isFinite(record.latitude) && Number.isFinite(record.longitude));
+      managementRecords.forEach((record) => {
+        const lat = Number(record.latitude);
+        const lng = Number(record.longitude);
+        const marker = window.L.marker([lat, lng]).addTo(managementMarkersLayer);
+        const address = record.address || "Address unavailable";
+        marker.bindPopup(`<strong>${escapeHtml(record.full_name || "Record")}</strong><br>${escapeHtml(record.phone || "—")}<br>${escapeHtml(address)}`);
+      });
+      if (managementRecords.length && managementMarkersLayer) {
+        const group = window.L.featureGroup(managementMarkersLayer.getLayers());
+        if (group.getBounds && group.getBounds().isValid()) {
+          managementMap.fitBounds(group.getBounds(), { padding: [24, 24] });
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load map records:", err);
+    }
+  }
+
+  async function overlayGISLayer(event) {
+    if (!managementMap || !window.L || !window.shp) return;
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (managementOverlayLayer) managementOverlayLayer.clearLayers();
+
+    try {
+      const geojson = await window.shp(file);
+      const layer = window.L.geoJSON(geojson, {
+        style: { color: "#ef4444", weight: 2, fillOpacity: 0.12 }
+      }).addTo(managementOverlayLayer);
+      if (layer.getBounds && layer.getBounds().isValid()) {
+        managementMap.fitBounds(layer.getBounds(), { padding: [24, 24] });
+      }
+    } catch (err) {
+      console.warn("Could not load GIS layer:", err);
+      showToast("Could not load the selected shapefile.");
+    }
+  }
+
+  function downloadTextFile(filename, content) {
+    const blob = new Blob([content], { type: "application/octet-stream;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportCoordinates(format) {
+    if (!managementRecords.length) {
+      showToast("No records available to export.");
+      return;
+    }
+
+    if (format === "kml") {
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Records</name>\n${managementRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile("fieldcollect-records.kml", content);
+    } else if (format === "kmz") {
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Records</name>\n${managementRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile("fieldcollect-records.kmz", content);
+    } else {
+      const lines = ["Name\tPhone\tLatitude\tLongitude\tAddress", ...managementRecords.map((record) => `${record.full_name || ""}\t${record.phone || ""}\t${record.latitude ?? ""}\t${record.longitude ?? ""}\t${record.address || ""}`)];
+      downloadTextFile("fieldcollect-records.txt", lines.join("\n"));
+    }
+    showToast("Export ready.");
+  }
+
+  function bindManagementDashboard() {
+    const gisInput = $("gisLayerInput");
+    if (gisInput) gisInput.addEventListener("change", overlayGISLayer);
+    $("exportKmlBtn")?.addEventListener("click", () => exportCoordinates("kml"));
+    $("exportKmzBtn")?.addEventListener("click", () => exportCoordinates("kmz"));
+    $("exportTxtBtn")?.addEventListener("click", () => exportCoordinates("txt"));
+  }
+
+  function initializeManagementDashboard() {
+    initManagementMap();
+    bindManagementDashboard();
+    loadMapRecords();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeManagementDashboard);
+  } else {
+    initializeManagementDashboard();
+  }
 })();
 </script>
 </body>
