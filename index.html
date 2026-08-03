@@ -507,10 +507,20 @@
     return Boolean(cleanedUrl && cleanedKey) && isValidHttpUrl(cleanedUrl);
   }
 
-  function initializeSupabase() {
+  function resolveSupabaseCredentials() {
+    const inputUrl = (document.getElementById("supabaseUrlInput")?.value || "").trim();
+    const inputKey = (document.getElementById("supabaseKeyInput")?.value || "").trim();
     const savedUrl = localStorage.getItem("fieldcollect.supabaseUrl") || "";
     const savedKey = localStorage.getItem("fieldcollect.supabaseAnonKey") || "";
-    isConfigured = applySupabaseConfig(savedUrl, savedKey);
+    return {
+      url: inputUrl || savedUrl || SUPABASE_URL,
+      key: inputKey || savedKey || SUPABASE_ANON_KEY,
+    };
+  }
+
+  function initializeSupabase() {
+    const { url, key } = resolveSupabaseCredentials();
+    isConfigured = applySupabaseConfig(url, key);
     isDbReady = false;
     sb = null;
     useLocalFallback = !isConfigured;
@@ -752,32 +762,80 @@
     return compact.length > 140 ? compact.slice(0, 137) + "..." : compact;
   }
 
+  function buildSupabasePayload(row) {
+    return {
+      full_name: row.full_name,
+      phone: row.phone,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      accuracy: row.accuracy,
+      address: row.address,
+      primary_file_url: row.primary_file_url,
+      primary_file_name: row.primary_file_name,
+      primary_file_type: row.primary_file_type,
+      support_file_url: row.support_file_url,
+      support_file_name: row.support_file_name,
+      support_file_type: row.support_file_type,
+    };
+  }
+
+  function buildFallbackSupabasePayload(row) {
+    return {
+      fullName: row.full_name,
+      phoneNumber: row.phone,
+      lat: row.latitude,
+      lng: row.longitude,
+      accuracy: row.accuracy,
+      location_address: row.address,
+      primary_file_url: row.primary_file_url,
+      primary_file_name: row.primary_file_name,
+      primary_file_type: row.primary_file_type,
+      support_file_url: row.support_file_url,
+      support_file_name: row.support_file_name,
+      support_file_type: row.support_file_type,
+    };
+  }
+
   async function saveRecordToSupabase(row) {
     if (!sb) return { ok: false, reason: "No Supabase client" };
 
-    try {
-      const { data, error } = await sb.from(TABLE_NAME).insert([row]).select();
-      if (error) {
+    const payloads = [buildSupabasePayload(row), buildFallbackSupabasePayload(row)];
+
+    for (const payload of payloads) {
+      try {
+        const { data, error } = await sb.from(TABLE_NAME).insert([payload]).select();
+        if (!error) {
+          return { ok: true, data: data && data[0] ? data[0] : null };
+        }
+
         const message = error.message || "unknown error";
-        if (message.toLowerCase().includes("table") || message.toLowerCase().includes("does not exist")) {
+        const lower = message.toLowerCase();
+        if (lower.includes("table") || lower.includes("does not exist")) {
           return { ok: false, reason: "The database table is missing. Create the records table in Supabase first." };
         }
-        if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("policy")) {
+        if (lower.includes("permission") || lower.includes("policy")) {
           return { ok: false, reason: "Supabase permissions are blocking inserts. Check your Row Level Security policies." };
+        }
+        if (lower.includes("column") && lower.includes("does not exist")) {
+          continue;
+        }
+        return { ok: false, reason: message };
+      } catch (err) {
+        const message = getSafeMessage(err, "The database insert failed.");
+        const lower = message.toLowerCase();
+        if (lower.includes("column") && lower.includes("does not exist")) {
+          continue;
         }
         return { ok: false, reason: message };
       }
-
-      return { ok: true, data: data && data[0] ? data[0] : null };
-    } catch (err) {
-      return { ok: false, reason: getSafeMessage(err, "The database insert failed.") };
     }
+
+    return { ok: false, reason: "The database schema did not accept the record payload." };
   }
 
   /* ---------- Supabase connection ---------- */
   async function connectSupabaseFromForm() {
-    const url = supabaseUrlInput.value.trim();
-    const key = supabaseKeyInput.value.trim();
+    const { url, key } = resolveSupabaseCredentials();
     if (!url || !key) {
       localStorage.removeItem("fieldcollect.supabaseUrl");
       localStorage.removeItem("fieldcollect.supabaseAnonKey");
@@ -1211,6 +1269,13 @@
     submitBtnLabel.textContent = "Saving…";
 
     try {
+      if (!sb || useLocalFallback || !isDbReady) {
+        await connectSupabaseFromForm();
+      }
+      if (!sb || useLocalFallback || !isDbReady) {
+        throw new Error("The database is not ready. Please connect Supabase and try again.");
+      }
+
       const recordFolder = "rec_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
       const [primaryUpload, supportUpload] = await Promise.all([
         uploadFile(files.primary, recordFolder),
