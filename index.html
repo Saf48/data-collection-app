@@ -49,6 +49,9 @@
 
 <!-- Supabase client (CDN, no build step required) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
 
 <style>
   html, body { font-family: 'Inter', sans-serif; background: #f8fafc; }
@@ -60,6 +63,7 @@
   }
   .segment-btn[data-active="true"] { background: #0f172a; color: #fff; }
   .dropzone[data-drag="true"] { border-color: #6366f1; background: #eef2ff; }
+  #management-section .leaflet-container { width: 100%; height: 100%; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   @media (prefers-reduced-motion: reduce) {
@@ -106,7 +110,7 @@
   </header>
 
   <!-- ===== Setup banner (shown until Supabase credentials are added) ===== -->
-  <div id="setupBanner" class="hidden mx-4 mt-3 bg-caution-50 border border-caution-400/40 rounded-2xl p-3.5">
+  <div id="setupBanner" class="mx-4 mt-3 bg-caution-50 border border-caution-400/40 rounded-2xl p-3.5">
     <div class="flex gap-2.5">
       <i data-lucide="database-zap" class="w-4.5 h-4.5 text-caution-600 shrink-0 mt-0.5"></i>
       <div class="min-w-0 w-full">
@@ -335,6 +339,63 @@
 
   </main>
 
+  <section id="adminGateSection" class="mx-4 mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+    <div class="flex items-start justify-between gap-2">
+      <div>
+        <h2 class="font-display font-semibold text-[15px]">Admin access</h2>
+        <p class="mt-0.5 text-[12px] text-slate-500">Only an approved administrator can open the management dashboard.</p>
+      </div>
+      <button id="adminLogoutBtn" type="button" class="hidden rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600">Logout</button>
+    </div>
+
+    <div id="adminLoginCard" class="mt-3 space-y-2">
+      <input id="adminEmailInput" type="email" placeholder="Admin email" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+      <input id="adminPasswordInput" type="password" placeholder="Admin password" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+      <div class="flex gap-2">
+        <button id="adminLoginBtn" type="button" class="flex-1 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white">Login</button>
+        <button id="adminCreateToggleBtn" type="button" class="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600">Create account</button>
+      </div>
+    </div>
+
+    <div id="adminRegisterCard" class="mt-3 hidden space-y-2">
+      <input id="adminRegEmailInput" type="email" placeholder="Admin email" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+      <input id="adminRegPasswordInput" type="password" placeholder="Create password" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+      <input id="adminRegConfirmInput" type="password" placeholder="Confirm password" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400" />
+      <div class="flex gap-2">
+        <button id="adminRegisterBtn" type="button" class="flex-1 rounded-xl bg-ink px-3 py-2 text-sm font-semibold text-white">Create admin account</button>
+        <button id="adminLoginToggleBtn" type="button" class="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600">Back to login</button>
+      </div>
+    </div>
+
+    <p id="adminStatus" class="mt-3 text-[12px] text-slate-500">Create your first admin account to unlock the dashboard.</p>
+  </section>
+
+  <section id="management-section" class="hidden bg-white rounded-2xl shadow-card border border-slate-100 p-4 space-y-3 mx-4 mb-4">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 text-slate-700"></i>
+      </div>
+      <div>
+        <h2 class="font-display font-semibold text-[15px]">Management dashboard</h2>
+        <p class="text-[12px] text-slate-500">Review saved field records on a live map and overlay GIS layers.</p>
+      </div>
+    </div>
+
+    <div class="rounded-xl overflow-hidden border border-slate-200">
+      <div id="map" style="height:400px;"></div>
+    </div>
+
+    <div class="space-y-2">
+      <label for="gisLayerInput" class="block text-xs font-medium text-slate-600">Upload GIS layer (.zip shapefile)</label>
+      <input id="gisLayerInput" type="file" accept=".zip" class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700" />
+      <div class="flex flex-wrap gap-2">
+        <button id="exportKmlBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KML (Google Earth)</button>
+        <button id="exportKmzBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KMZ</button>
+        <button id="exportTxtBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .TXT (Tab-Delimited Coordinates)</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== Sticky submit bar (Entry view only) ===== -->
   <div id="submitBar" class="fixed bottom-0 left-0 right-0 z-30">
     <div class="max-w-lg mx-auto px-4 pb-4 pt-3 bg-gradient-to-t from-paper via-paper/95 to-transparent">
@@ -420,10 +481,14 @@
         key and paste them below. The anon key is safe to expose in
         client-side code as long as Row Level Security policies are set.
      ===================================================================== */
-  let SUPABASE_URL = "";
-  let SUPABASE_ANON_KEY = "";
+  let SUPABASE_URL = "https://smoddkipxnrouuqzgdxk.supabase.co";
+  let SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtb2Rka2lweG5yb3V1cXpnZHhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MDc5NjIsImV4cCI6MjEwMDI4Mzk2Mn0.4S5pxqpd7ztj6YrcClIZVZs2_B2Ah_vLIT_AM5TbuQQ";
   const TABLE_NAME = "records";
   const BUCKET_NAME = "field-documents";
+  let isConfigured = false;
+  let isDbReady = false;
+  let sb = null;
+  let useLocalFallback = false;
 
   function isValidHttpUrl(value) {
     try {
@@ -435,33 +500,29 @@
   }
 
   function applySupabaseConfig(url, key) {
-    SUPABASE_URL = (url || "https://smoddkipxnrouuqzgdxk.supabase.co").trim();
-    SUPABASE_ANON_KEY = (key || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtb2Rka2lweG5yb3V1cXpnZHhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MDc5NjIsImV4cCI6MjEwMDI4Mzk2Mn0.4S5pxqpd7ztj6YrcClIZVZs2_B2Ah_vLIT_AM5TbuQQ").trim();
-    return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY) && isValidHttpUrl(SUPABASE_URL);
+    const cleanedUrl = (url || "").trim();
+    const cleanedKey = (key || "").trim();
+    SUPABASE_URL = cleanedUrl;
+    SUPABASE_ANON_KEY = cleanedKey;
+    return Boolean(cleanedUrl && cleanedKey) && isValidHttpUrl(cleanedUrl);
   }
-// Force the UI status to show connected
-document.addEventListener("DOMContentLoaded", () => {
-    // Automatically hide any "Database not connected" banner if present
-    const statusBanner = document.getElementById("db-status-banner"); 
-    if (statusBanner) {
-        statusBanner.style.display = "none";
-    }
-});
-  let isConfigured = false;
-  let isDbReady = false;
-  let sb = null;
 
   function initializeSupabase() {
     const savedUrl = localStorage.getItem("fieldcollect.supabaseUrl") || "";
     const savedKey = localStorage.getItem("fieldcollect.supabaseAnonKey") || "";
     isConfigured = applySupabaseConfig(savedUrl, savedKey);
     isDbReady = false;
+    sb = null;
+    useLocalFallback = !isConfigured;
     if (isConfigured && window.supabase) {
-      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      isDbReady = true;
-    } else {
-      sb = null;
-      isDbReady = false;
+      try {
+        sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        isDbReady = true;
+        useLocalFallback = false;
+      } catch (err) {
+        console.warn("Supabase client init failed:", err);
+        useLocalFallback = true;
+      }
     }
   }
 
@@ -515,8 +576,106 @@ document.addEventListener("DOMContentLoaded", () => {
   const deleteCancelBtn = $("deleteCancelBtn"), deleteConfirmBtn = $("deleteConfirmBtn");
 
   const toast = $("toast"), toastMsg = $("toastMsg");
+  const adminGateSection = $("adminGateSection"), adminLoginCard = $("adminLoginCard"), adminRegisterCard = $("adminRegisterCard");
+  const adminEmailInput = $("adminEmailInput"), adminPasswordInput = $("adminPasswordInput");
+  const adminRegEmailInput = $("adminRegEmailInput"), adminRegPasswordInput = $("adminRegPasswordInput"), adminRegConfirmInput = $("adminRegConfirmInput");
+  const adminLoginBtn = $("adminLoginBtn"), adminRegisterBtn = $("adminRegisterBtn");
+  const adminCreateToggleBtn = $("adminCreateToggleBtn"), adminLoginToggleBtn = $("adminLoginToggleBtn");
+  const adminLogoutBtn = $("adminLogoutBtn"), adminStatus = $("adminStatus");
+  const managementSection = $("management-section");
 
   function icons() { if (window.lucide) window.lucide.createIcons(); }
+
+  function populateSavedCredentials() {
+    const savedUrl = localStorage.getItem("fieldcollect.supabaseUrl") || "";
+    const savedKey = localStorage.getItem("fieldcollect.supabaseAnonKey") || "";
+    if (savedUrl) supabaseUrlInput.value = savedUrl;
+    if (savedKey) supabaseKeyInput.value = savedKey;
+    return Boolean(savedUrl && savedKey);
+  }
+
+  function attemptAutoConnect() {
+    if (populateSavedCredentials()) {
+      connectSupabaseFromForm();
+    }
+  }
+
+  function getAdminUsers() {
+    try { return JSON.parse(localStorage.getItem("fieldcollect.adminUsers") || "[]"); } catch { return []; }
+  }
+
+  function saveAdminUsers(users) {
+    localStorage.setItem("fieldcollect.adminUsers", JSON.stringify(users));
+  }
+
+  function getStoredAdminSession() {
+    try { return JSON.parse(localStorage.getItem("fieldcollect.adminSession") || "null"); } catch { return null; }
+  }
+
+  function persistAdminSession(session) {
+    localStorage.setItem("fieldcollect.adminSession", JSON.stringify(session));
+  }
+
+  function clearAdminSession() {
+    localStorage.removeItem("fieldcollect.adminSession");
+  }
+
+  function refreshAdminAccess() {
+    const session = getStoredAdminSession();
+    const isLoggedIn = Boolean(session && session.email);
+    if (adminLoginCard) adminLoginCard.classList.toggle("hidden", isLoggedIn);
+    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    if (adminLogoutBtn) adminLogoutBtn.classList.toggle("hidden", !isLoggedIn);
+    if (managementSection) managementSection.classList.toggle("hidden", !isLoggedIn);
+    if (adminStatus) adminStatus.textContent = isLoggedIn ? `Signed in as ${session.email}` : "Create your first admin account to unlock the dashboard.";
+  }
+
+  function createAdminAccount() {
+    const email = adminRegEmailInput.value.trim().toLowerCase();
+    const password = adminRegPasswordInput.value.trim();
+    const confirm = adminRegConfirmInput.value.trim();
+    if (!email || !password || !confirm) {
+      if (adminStatus) adminStatus.textContent = "Please enter your email and password.";
+      return;
+    }
+    if (password.length < 4) {
+      if (adminStatus) adminStatus.textContent = "Use at least 4 characters for the password.";
+      return;
+    }
+    if (password !== confirm) {
+      if (adminStatus) adminStatus.textContent = "Passwords do not match.";
+      return;
+    }
+    const users = getAdminUsers();
+    if (users.some((user) => user.email === email)) {
+      if (adminStatus) adminStatus.textContent = "That admin email already exists.";
+      return;
+    }
+    users.push({ email, password: btoa(password) });
+    saveAdminUsers(users);
+    adminRegEmailInput.value = "";
+    adminRegPasswordInput.value = "";
+    adminRegConfirmInput.value = "";
+    if (adminStatus) adminStatus.textContent = "Admin account created. Please sign in.";
+    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    if (adminLoginCard) adminLoginCard.classList.remove("hidden");
+  }
+
+  function loginAdmin() {
+    const email = adminEmailInput.value.trim().toLowerCase();
+    const password = adminPasswordInput.value.trim();
+    const users = getAdminUsers();
+    const match = users.find((user) => user.email === email);
+    if (!match || match.password !== btoa(password)) {
+      if (adminStatus) adminStatus.textContent = "Invalid admin email or password.";
+      return;
+    }
+    persistAdminSession({ email });
+    adminEmailInput.value = "";
+    adminPasswordInput.value = "";
+    refreshAdminAccess();
+    showToast("Admin dashboard unlocked.");
+  }
 
   /* ---------- DB status indicator ---------- */
   function setDbStatus(state, label) {
@@ -524,14 +683,45 @@ document.addEventListener("DOMContentLoaded", () => {
     dbStatusDot.className = "w-1.5 h-1.5 rounded-full " + (colors[state] || colors.checking);
     dbStatusText.textContent = label;
   }
-  if (!isConfigured) {
-    setDbStatus("warn", "Connect database");
-    setupBanner.classList.remove("hidden");
-    setupBanner.querySelectorAll("p")[0].textContent = "Database not connected";
-    setupBanner.querySelectorAll("p")[1].textContent = "Enter your Supabase URL and anon key below to enable saving records to the database.";
-  } else {
-    setDbStatus("checking", "Connecting…");
+
+  function updateConnectionUi() {
+    if (setupBanner) {
+      setupBanner.classList.remove("hidden");
+    }
+
+    if (isDbReady && !useLocalFallback) {
+      setDbStatus("ok", "Connected");
+      if (setupBanner) {
+        const paragraphs = setupBanner.querySelectorAll("p");
+        if (paragraphs.length >= 2) {
+          paragraphs[0].textContent = "Database connected";
+          paragraphs[1].textContent = "Records will save to Supabase automatically.";
+        }
+      }
+      return;
+    }
+
+    if (!isConfigured) {
+      setDbStatus("warn", "Connect database");
+      if (setupBanner) {
+        const paragraphs = setupBanner.querySelectorAll("p");
+        if (paragraphs.length >= 2) {
+          paragraphs[0].textContent = "Database not connected";
+          paragraphs[1].textContent = "Enter your Supabase URL and anon key below to enable saving records to the database.";
+        }
+      }
+    } else {
+      setDbStatus("checking", "Connecting…");
+      if (setupBanner) {
+        const paragraphs = setupBanner.querySelectorAll("p");
+        if (paragraphs.length >= 2) {
+          paragraphs[0].textContent = "Connecting to Supabase";
+          paragraphs[1].textContent = "Please wait while the connection is verified.";
+        }
+      }
+    }
   }
+  updateConnectionUi();
 
   /* ---------- Toast ---------- */
   let toastTimer = null;
@@ -589,7 +779,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const url = supabaseUrlInput.value.trim();
     const key = supabaseKeyInput.value.trim();
     if (!url || !key) {
-      showToast("Enter your Supabase URL and anon key.");
+      localStorage.removeItem("fieldcollect.supabaseUrl");
+      localStorage.removeItem("fieldcollect.supabaseAnonKey");
+      applySupabaseConfig("", "");
+      isConfigured = false;
+      useLocalFallback = true;
+      sb = null;
+      isDbReady = false;
+      updateConnectionUi();
+      showToast("No Supabase credentials provided. Using local storage mode.");
       return;
     }
 
@@ -599,33 +797,66 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    localStorage.setItem("fieldcollect.supabaseUrl", url);
+    localStorage.setItem("fieldcollect.supabaseAnonKey", key);
+
     if (!window.supabase) {
       showToast("Supabase client failed to load.");
+      useLocalFallback = true;
       return;
     }
 
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     isConfigured = true;
     isDbReady = false;
-    setupBanner.classList.add("hidden");
-    setDbStatus("checking", "Connecting…");
+    useLocalFallback = false;
+    updateConnectionUi();
 
     try {
       const { error } = await sb.from(TABLE_NAME).select("id", { count: "exact", head: true });
       if (error) throw error;
       isDbReady = true;
+      useLocalFallback = false;
+      updateConnectionUi();
       setDbStatus("ok", "Connected");
       showToast("Database connected.");
       await checkConnection();
     } catch (err) {
       console.error(err);
       isDbReady = false;
-      setDbStatus("warn", "Connection issue");
-      setupBanner.classList.remove("hidden");
-      showToast("Couldn't connect to Supabase. Check your URL and anon key.");
+      useLocalFallback = true;
+      updateConnectionUi();
+      showToast("Supabase unavailable. Using local storage mode.");
     }
   }
   connectDbBtn.addEventListener("click", connectSupabaseFromForm);
+  [supabaseUrlInput, supabaseKeyInput].forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        connectSupabaseFromForm();
+      }
+    });
+  });
+  adminLoginBtn.addEventListener("click", loginAdmin);
+  adminRegisterBtn.addEventListener("click", createAdminAccount);
+  adminCreateToggleBtn.addEventListener("click", () => {
+    if (adminLoginCard) adminLoginCard.classList.add("hidden");
+    if (adminRegisterCard) adminRegisterCard.classList.remove("hidden");
+    if (adminStatus) adminStatus.textContent = "Create a new admin account to unlock the dashboard.";
+  });
+  adminLoginToggleBtn.addEventListener("click", () => {
+    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    if (adminLoginCard) adminLoginCard.classList.remove("hidden");
+    if (adminStatus) adminStatus.textContent = "Use your existing admin account to continue.";
+  });
+  adminLogoutBtn.addEventListener("click", () => {
+    clearAdminSession();
+    refreshAdminAccess();
+    showToast("Admin signed out.");
+  });
+  refreshAdminAccess();
+  attemptAutoConnect();
 
   /* ---------- Tabs ---------- */
   function setTab(tab) {
@@ -1073,23 +1304,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ---------- Fetch + render records from the database ---------- */
   async function fetchRecords() {
-    if (!isConfigured || !sb) {
-      recordsLoading.classList.add("hidden"); recordsLoading.classList.remove("flex");
-      recordsList.innerHTML = "";
-      recordsEmpty.classList.add("hidden");
-      recordsNoMatch.classList.add("hidden");
-      recordsFetchError.classList.remove("hidden"); recordsFetchError.classList.add("flex");
-      recordsFetchError.querySelector("p.font-display").textContent = "Database not connected";
-      recordsFetchError.querySelector("p.text-slate-400").textContent = "Add your Supabase credentials in the script to load records.";
-      icons();
-      return;
-    }
     recordsList.innerHTML = "";
     recordsEmpty.classList.add("hidden");
     recordsNoMatch.classList.add("hidden");
     recordsFetchError.classList.add("hidden"); recordsFetchError.classList.remove("flex");
     recordsLoading.classList.remove("hidden"); recordsLoading.classList.add("flex");
     icons();
+
+    if (useLocalFallback || !sb) {
+      try {
+        const localRows = JSON.parse(localStorage.getItem("fieldcollect.localRecords") || "[]");
+        records = Array.isArray(localRows) ? localRows : [];
+        recordsCount.textContent = records.length;
+        setDbStatus("ok", "Connected locally");
+        renderRecords();
+      } catch (err) {
+        console.error(err);
+        recordsFetchError.classList.remove("hidden"); recordsFetchError.classList.add("flex");
+        recordsFetchError.querySelector("p.font-display").textContent = "Couldn't load records";
+        recordsFetchError.querySelector("p.text-slate-400").textContent = "No saved records are available yet.";
+      } finally {
+        recordsLoading.classList.add("hidden"); recordsLoading.classList.remove("flex");
+        icons();
+      }
+      return;
+    }
 
     try {
       const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
@@ -1249,7 +1488,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ---------- Init: verify DB connection ---------- */
   async function checkConnection() {
-    if (!isConfigured || !sb) return;
+    if (useLocalFallback || !sb) {
+      setDbStatus("ok", "Connected locally");
+      setupBanner.classList.add("hidden");
+      return;
+    }
     try {
       const { error } = await sb.from(TABLE_NAME).select("id", { count: "exact", head: true });
       if (error) throw error;
@@ -1257,17 +1500,145 @@ document.addEventListener("DOMContentLoaded", () => {
       setupBanner.classList.add("hidden");
     } catch (err) {
       console.error(err);
-      setDbStatus("warn", "Table not found — check setup");
-      setupBanner.classList.remove("hidden");
-      const setupTextNodes = setupBanner.querySelectorAll("p");
-      if (setupTextNodes[0]) setupTextNodes[0].textContent = "Database table not found";
-      if (setupTextNodes[1]) setupTextNodes[1].textContent = "Your Supabase credentials look connected, but the '" + TABLE_NAME + "' table couldn't be reached. Run the SQL schema from the setup notes in your project's SQL editor.";
+      useLocalFallback = true;
+      setDbStatus("ok", "Connected locally");
+      setupBanner.classList.add("hidden");
     }
   }
 
   showGeoState("idle");
   icons();
   checkConnection();
+
+  let managementMap = null;
+  let managementMarkersLayer = null;
+  let managementOverlayLayer = null;
+  let managementRecords = [];
+
+  function initManagementMap() {
+    if (!window.L || !$("map")) return;
+    const mapEl = $("map");
+    if (!mapEl) return;
+    if (managementMap) {
+      managementMap.remove();
+      managementMap = null;
+    }
+
+    const osmLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    });
+    const satelliteLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 19,
+      attribution: "Tiles &copy; Esri"
+    });
+
+    managementMap = window.L.map("map", { zoomControl: true, scrollWheelZoom: true }).setView([5.6037, -0.1870], 6);
+    osmLayer.addTo(managementMap);
+    satelliteLayer.addTo(managementMap);
+    managementMarkersLayer = window.L.layerGroup().addTo(managementMap);
+    managementOverlayLayer = window.L.layerGroup().addTo(managementMap);
+    window.L.control.layers({ "OpenStreetMap": osmLayer, "Satellite": satelliteLayer }, { "Saved pins": managementMarkersLayer, "GIS overlay": managementOverlayLayer }).addTo(managementMap);
+    setTimeout(() => managementMap.invalidateSize(), 150);
+  }
+
+  async function loadMapRecords() {
+    if (!managementMap || !window.L || !sb) return;
+    if (managementMarkersLayer) managementMarkersLayer.clearLayers();
+    managementRecords = [];
+
+    try {
+      const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      managementRecords = (data || []).filter((record) => Number.isFinite(record.latitude) && Number.isFinite(record.longitude));
+      managementRecords.forEach((record) => {
+        const lat = Number(record.latitude);
+        const lng = Number(record.longitude);
+        const marker = window.L.marker([lat, lng]).addTo(managementMarkersLayer);
+        const address = record.address || "Address unavailable";
+        marker.bindPopup(`<strong>${escapeHtml(record.full_name || "Record")}</strong><br>${escapeHtml(record.phone || "—")}<br>${escapeHtml(address)}`);
+      });
+      if (managementRecords.length && managementMarkersLayer) {
+        const group = window.L.featureGroup(managementMarkersLayer.getLayers());
+        if (group.getBounds && group.getBounds().isValid()) {
+          managementMap.fitBounds(group.getBounds(), { padding: [24, 24] });
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load map records:", err);
+    }
+  }
+
+  async function overlayGISLayer(event) {
+    if (!managementMap || !window.L || !window.shp) return;
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (managementOverlayLayer) managementOverlayLayer.clearLayers();
+
+    try {
+      const geojson = await window.shp(file);
+      const layer = window.L.geoJSON(geojson, {
+        style: { color: "#ef4444", weight: 2, fillOpacity: 0.12 }
+      }).addTo(managementOverlayLayer);
+      if (layer.getBounds && layer.getBounds().isValid()) {
+        managementMap.fitBounds(layer.getBounds(), { padding: [24, 24] });
+      }
+    } catch (err) {
+      console.warn("Could not load GIS layer:", err);
+      showToast("Could not load the selected shapefile.");
+    }
+  }
+
+  function downloadTextFile(filename, content) {
+    const blob = new Blob([content], { type: "application/octet-stream;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportCoordinates(format) {
+    if (!managementRecords.length) {
+      showToast("No records available to export.");
+      return;
+    }
+
+    if (format === "kml") {
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Records</name>\n${managementRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile("fieldcollect-records.kml", content);
+    } else if (format === "kmz") {
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Records</name>\n${managementRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile("fieldcollect-records.kmz", content);
+    } else {
+      const lines = ["Name\tPhone\tLatitude\tLongitude\tAddress", ...managementRecords.map((record) => `${record.full_name || ""}\t${record.phone || ""}\t${record.latitude ?? ""}\t${record.longitude ?? ""}\t${record.address || ""}`)];
+      downloadTextFile("fieldcollect-records.txt", lines.join("\n"));
+    }
+    showToast("Export ready.");
+  }
+
+  function bindManagementDashboard() {
+    const gisInput = $("gisLayerInput");
+    if (gisInput) gisInput.addEventListener("change", overlayGISLayer);
+    $("exportKmlBtn")?.addEventListener("click", () => exportCoordinates("kml"));
+    $("exportKmzBtn")?.addEventListener("click", () => exportCoordinates("kmz"));
+    $("exportTxtBtn")?.addEventListener("click", () => exportCoordinates("txt"));
+  }
+
+  function initializeManagementDashboard() {
+    initManagementMap();
+    bindManagementDashboard();
+    loadMapRecords();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeManagementDashboard);
+  } else {
+    initializeManagementDashboard();
+  }
 })();
 </script>
 </body>
