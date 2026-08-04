@@ -52,6 +52,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.20.4/dist/proj4.js"></script>
 
 <style>
   html, body { font-family: 'Inter', sans-serif; background: #f8fafc; }
@@ -64,6 +65,21 @@
   .segment-btn[data-active="true"] { background: #0f172a; color: #fff; }
   .dropzone[data-drag="true"] { border-color: #6366f1; background: #eef2ff; }
   #management-section .leaflet-container { width: 100%; height: 100%; }
+  .field-marker-selected {
+    width: 34px;
+    height: 34px;
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d9488;
+    color: #ffffff;
+    border: 3px solid #ffffff;
+    box-shadow: 0 0 0 3px rgba(13,148,136,0.35), 0 8px 18px rgba(15,23,42,0.28);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+  }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   @media (prefers-reduced-motion: reduce) {
@@ -343,7 +359,7 @@
     <div class="flex items-start justify-between gap-2">
       <div>
         <h2 class="font-display font-semibold text-[15px]">Admin access</h2>
-        <p class="mt-0.5 text-[12px] text-slate-500">Only an approved administrator can open the management dashboard.</p>
+        <p class="mt-0.5 text-[12px] text-slate-500">First use on each computer: create an admin account. Accounts are stored in that browser only.</p>
       </div>
       <button id="adminLogoutBtn" type="button" class="hidden rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600">Logout</button>
     </div>
@@ -367,7 +383,7 @@
       </div>
     </div>
 
-    <p id="adminStatus" class="mt-3 text-[12px] text-slate-500">Create your first admin account to unlock the dashboard.</p>
+    <p id="adminStatus" class="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-[12px] text-slate-600" role="status" aria-live="polite">Checking admin setup…</p>
   </section>
 
   <section id="management-section" class="hidden bg-white rounded-2xl shadow-card border border-slate-100 p-4 space-y-3 mx-4 mb-4">
@@ -385,18 +401,48 @@
       <div id="map" style="height:400px;"></div>
     </div>
 
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <p class="text-xs font-semibold text-slate-700">Report selection</p>
+          <p id="selectionStatus" class="text-[12px] text-slate-500">0 of 0 reports selected</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="selectAllRecordsBtn" type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Select all</button>
+          <button id="clearSelectedRecordsBtn" type="button" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Clear selection</button>
+        </div>
+      </div>
+      <p class="text-[11px] leading-snug text-slate-500">Click a map pin to select or deselect that report. A selected pin displays a green check mark and only selected reports are exported.</p>
+    </div>
+
     <div class="space-y-2">
       <label for="gisLayerInput" class="block text-xs font-medium text-slate-600">Upload GIS layer (.zip shapefile)</label>
       <input id="gisLayerInput" type="file" accept=".zip" class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700" />
-      <div class="flex flex-wrap gap-2">
-        <button id="drawPolygonBtn" type="button" class="rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-700">Draw polygon</button>
-        <button id="clearSelectionBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Clear selection</button>
+
+      <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <label for="dwgLayerInput" class="block text-xs font-medium text-slate-600">Upload AutoCAD drawing (.dwg)</label>
+          <button id="clearDwgLayerBtn" type="button" disabled class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50">Clear drawing</button>
+        </div>
+        <input id="dwgLayerInput" type="file" accept=".dwg,application/acad,application/x-acad,application/autocad_dwg,image/vnd.dwg" class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700" />
+        <div>
+          <label for="dwgCrsSelect" class="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Drawing coordinate system</label>
+          <select id="dwgCrsSelect" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+            <option value="auto">Auto-detect Ghana coordinate system</option>
+            <option value="EPSG:25000">Leigon / Ghana Metre Grid</option>
+            <option value="EPSG:2136">Accra / Ghana National Grid</option>
+            <option value="EPSG:32630">WGS 84 / UTM zone 30N</option>
+            <option value="EPSG:32631">WGS 84 / UTM zone 31N</option>
+            <option value="EPSG:4326">WGS 84 longitude / latitude</option>
+          </select>
+        </div>
+        <p id="dwgImportStatus" role="status" aria-live="polite" class="text-[11px] leading-snug text-slate-500">No AutoCAD drawing loaded.</p>
       </div>
-      <p id="selectionSummary" class="text-[12px] text-slate-500">No polygon selected yet.</p>
+
       <div class="flex flex-wrap gap-2">
-        <button id="exportKmlBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KML (Google Earth)</button>
-        <button id="exportKmzBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .KMZ</button>
-        <button id="exportTxtBtn" type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">Export .TXT (Tab-Delimited Coordinates)</button>
+        <button id="exportKmlBtn" type="button" disabled class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Export selected .KML (Google Earth)</button>
+        <button id="exportKmzBtn" type="button" disabled class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Export selected .KMZ</button>
+        <button id="exportTxtBtn" type="button" disabled class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50">Export selected .TXT (Tab-Delimited Coordinates)</button>
       </div>
     </div>
   </section>
@@ -549,6 +595,9 @@
   let files = { primary: null, support: null }; // { file: File, name, size, type, previewUrl }
   let isSaving = false;
   let activeDetailId = null;
+  const GEO_TARGET_ACCURACY = 5;
+  const GEO_MAX_ATTEMPTS = 4;
+  const GEO_RETRY_DELAY_MS = 1500;
 
   /* ---------- Elements ---------- */
   const $ = (id) => document.getElementById(id);
@@ -635,64 +684,125 @@
     localStorage.removeItem("fieldcollect.adminSession");
   }
 
+  function setAdminStatus(message, state = "info") {
+    if (!adminStatus) return;
+    const styles = {
+      info: "mt-3 rounded-xl bg-slate-50 px-3 py-2 text-[12px] text-slate-600",
+      success: "mt-3 rounded-xl bg-signal-50 px-3 py-2 text-[12px] text-emerald-700",
+      error: "mt-3 rounded-xl bg-alert-50 px-3 py-2 text-[12px] text-rose-700"
+    };
+    adminStatus.className = styles[state] || styles.info;
+    adminStatus.textContent = message;
+  }
+
+  function encodeAdminPassword(password) {
+    return btoa(unescape(encodeURIComponent(password)));
+  }
+
   function refreshAdminAccess() {
+    const users = getAdminUsers();
     const session = getStoredAdminSession();
     const isLoggedIn = Boolean(session && session.email);
-    if (adminLoginCard) adminLoginCard.classList.toggle("hidden", isLoggedIn);
-    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
+    const hasAdminAccount = users.length > 0;
+
+    if (adminLoginCard) adminLoginCard.classList.toggle("hidden", isLoggedIn || !hasAdminAccount);
+    if (adminRegisterCard) adminRegisterCard.classList.toggle("hidden", isLoggedIn || hasAdminAccount);
     if (adminLogoutBtn) adminLogoutBtn.classList.toggle("hidden", !isLoggedIn);
     if (managementSection) managementSection.classList.toggle("hidden", !isLoggedIn);
-    if (adminStatus) adminStatus.textContent = isLoggedIn ? `Signed in as ${session.email}` : "Create your first admin account to unlock the dashboard.";
+
     if (isLoggedIn) {
-      setTimeout(() => initializeManagementDashboard(true), 220);
+      setAdminStatus(`Signed in as ${session.email}.`, "success");
+      setTimeout(() => {
+        if (managementMap) managementMap.invalidateSize();
+        loadMapRecords();
+      }, 150);
+    } else if (!hasAdminAccount) {
+      setAdminStatus("No admin account exists on this browser yet. Create one below to continue.", "info");
+    } else {
+      setAdminStatus("Enter the admin email and password created in this browser.", "info");
     }
   }
 
   function createAdminAccount() {
     const email = adminRegEmailInput.value.trim().toLowerCase();
-    const password = adminRegPasswordInput.value.trim();
-    const confirm = adminRegConfirmInput.value.trim();
+    const password = adminRegPasswordInput.value;
+    const confirm = adminRegConfirmInput.value;
+
     if (!email || !password || !confirm) {
-      if (adminStatus) adminStatus.textContent = "Please enter your email and password.";
+      setAdminStatus("Enter an email, password and password confirmation.", "error");
+      showToast("Complete all admin account fields.");
+      return;
+    }
+    if (!adminRegEmailInput.checkValidity()) {
+      setAdminStatus("Enter a valid admin email address.", "error");
+      adminRegEmailInput.focus();
       return;
     }
     if (password.length < 4) {
-      if (adminStatus) adminStatus.textContent = "Use at least 4 characters for the password.";
+      setAdminStatus("Use at least 4 characters for the password.", "error");
+      adminRegPasswordInput.focus();
       return;
     }
     if (password !== confirm) {
-      if (adminStatus) adminStatus.textContent = "Passwords do not match.";
+      setAdminStatus("Passwords do not match.", "error");
+      adminRegConfirmInput.focus();
       return;
     }
+
     const users = getAdminUsers();
     if (users.some((user) => user.email === email)) {
-      if (adminStatus) adminStatus.textContent = "That admin email already exists.";
+      setAdminStatus("That admin email already exists on this browser. Use Login instead.", "error");
       return;
     }
-    users.push({ email, password: btoa(password) });
-    saveAdminUsers(users);
-    adminRegEmailInput.value = "";
-    adminRegPasswordInput.value = "";
-    adminRegConfirmInput.value = "";
-    if (adminStatus) adminStatus.textContent = "Admin account created. Please sign in.";
-    if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
-    if (adminLoginCard) adminLoginCard.classList.remove("hidden");
+
+    try {
+      users.push({ email, password: encodeAdminPassword(password) });
+      saveAdminUsers(users);
+      persistAdminSession({ email });
+      adminRegEmailInput.value = "";
+      adminRegPasswordInput.value = "";
+      adminRegConfirmInput.value = "";
+      refreshAdminAccess();
+      showToast("Admin account created. Dashboard unlocked.");
+    } catch (err) {
+      console.error("Admin account creation failed:", err);
+      setAdminStatus("This browser could not save the admin account. Open the file using Live Server in Chrome or Edge.", "error");
+    }
   }
 
   function loginAdmin() {
     const email = adminEmailInput.value.trim().toLowerCase();
-    const password = adminPasswordInput.value.trim();
+    const password = adminPasswordInput.value;
     const users = getAdminUsers();
-    const match = users.find((user) => user.email === email);
-    if (!match || match.password !== btoa(password)) {
-      if (adminStatus) adminStatus.textContent = "Invalid admin email or password.";
+
+    if (!users.length) {
+      if (adminLoginCard) adminLoginCard.classList.add("hidden");
+      if (adminRegisterCard) adminRegisterCard.classList.remove("hidden");
+      setAdminStatus("Create an admin account on this browser before trying to log in.", "error");
       return;
     }
-    persistAdminSession({ email });
-    adminEmailInput.value = "";
-    adminPasswordInput.value = "";
-    refreshAdminAccess();
-    showToast("Admin dashboard unlocked.");
+    if (!email || !password) {
+      setAdminStatus("Enter both the admin email and password.", "error");
+      return;
+    }
+
+    const match = users.find((user) => user.email === email);
+    if (!match || match.password !== encodeAdminPassword(password)) {
+      setAdminStatus("Invalid admin email or password for this browser.", "error");
+      showToast("Admin login failed.");
+      return;
+    }
+
+    try {
+      persistAdminSession({ email });
+      adminEmailInput.value = "";
+      adminPasswordInput.value = "";
+      refreshAdminAccess();
+      showToast("Admin dashboard unlocked.");
+    } catch (err) {
+      console.error("Admin login failed:", err);
+      setAdminStatus("This browser could not save the login session. Open the file using Live Server.", "error");
+    }
   }
 
   /* ---------- DB status indicator ---------- */
@@ -906,15 +1016,33 @@
   });
   adminLoginBtn.addEventListener("click", loginAdmin);
   adminRegisterBtn.addEventListener("click", createAdminAccount);
+  [adminEmailInput, adminPasswordInput].forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        loginAdmin();
+      }
+    });
+  });
+  [adminRegEmailInput, adminRegPasswordInput, adminRegConfirmInput].forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        createAdminAccount();
+      }
+    });
+  });
   adminCreateToggleBtn.addEventListener("click", () => {
     if (adminLoginCard) adminLoginCard.classList.add("hidden");
     if (adminRegisterCard) adminRegisterCard.classList.remove("hidden");
-    if (adminStatus) adminStatus.textContent = "Create a new admin account to unlock the dashboard.";
+    setAdminStatus("Create an admin account for this browser. You will be signed in automatically.", "info");
+    adminRegEmailInput.focus();
   });
   adminLoginToggleBtn.addEventListener("click", () => {
     if (adminRegisterCard) adminRegisterCard.classList.add("hidden");
     if (adminLoginCard) adminLoginCard.classList.remove("hidden");
-    if (adminStatus) adminStatus.textContent = "Use your existing admin account to continue.";
+    setAdminStatus("Use the admin account previously created in this browser.", "info");
+    adminEmailInput.focus();
   });
   adminLogoutBtn.addEventListener("click", () => {
     clearAdminSession();
@@ -1053,31 +1181,55 @@
     }
 
     showGeoState("loading");
+    accuracyNote.textContent = "Holding still and improving the GPS fix…";
+    accuracyVal.textContent = "—";
+    latVal.textContent = "—";
+    lngVal.textContent = "—";
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const accuracy = position.coords.accuracy;
-
-        currentLocation = { lat, lng, accuracy, address: null };
-        showGeoState("success");
-        renderLocation();
-        reverseGeocode(lat, lng);
-      },
-      async (error) => {
-        console.warn("Geolocation Error:", error);
-        const fallbackWorked = await tryIpFallback();
-        if (!fallbackWorked) {
-          await useDemoLocation();
-        }
-      },
-      {
+    const tryAcquire = () => new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 8000,
         maximumAge: 0
+      });
+    });
+
+    let lastError = null;
+    for (let attempt = 1; attempt <= GEO_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const position = await tryAcquire();
+        const lat = Number(position.coords.latitude);
+        const lng = Number(position.coords.longitude);
+        const accuracy = Number(position.coords.accuracy);
+
+        if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(accuracy) && accuracy <= GEO_TARGET_ACCURACY) {
+          currentLocation = { lat, lng, accuracy, address: null };
+          showGeoState("success");
+          renderLocation();
+          reverseGeocode(lat, lng);
+          return;
+        }
+
+        lastError = new Error(`Accuracy ${Math.round(accuracy)}m`);
+        if (attempt < GEO_MAX_ATTEMPTS) {
+          accuracyNote.textContent = `Still refining GPS… attempt ${attempt}/${GEO_MAX_ATTEMPTS}`;
+          await new Promise((resolve) => setTimeout(resolve, GEO_RETRY_DELAY_MS));
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt < GEO_MAX_ATTEMPTS) {
+          accuracyNote.textContent = `Retrying GPS lock… attempt ${attempt}/${GEO_MAX_ATTEMPTS}`;
+          await new Promise((resolve) => setTimeout(resolve, GEO_RETRY_DELAY_MS));
+        }
       }
-    );
+    }
+
+    currentLocation = null;
+    showGeoState("error");
+    geoErrorTitle.textContent = "GPS accuracy too low";
+    geoErrorMsg.textContent = "Move to an open area, stand still, and try again. We need a location within 5 meters.";
+    accuracyNote.textContent = "Need a stronger GPS fix.";
+    console.warn("Geolocation did not reach the 5m target:", lastError);
   }
 
   function renderLocation() {
@@ -1089,15 +1241,15 @@
     accuracyVal.textContent = acc + " m";
     const pct = Math.max(4, Math.min(100, 100 - Math.min(acc, 100)));
     accuracyBar.style.width = pct + "%";
-    if (acc <= 15) {
+    if (acc <= GEO_TARGET_ACCURACY) {
       accuracyBar.className = "h-full rounded-full bg-signal-500 transition-all duration-500";
-      accuracyNote.textContent = "Excellent precision for this reading.";
-    } else if (acc <= 50) {
+      accuracyNote.textContent = "Target achieved — within 5 meters.";
+    } else if (acc <= 15) {
       accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
       accuracyNote.textContent = "Good precision — usable for most records.";
     } else if (acc <= 1500) {
       accuracyBar.className = "h-full rounded-full bg-caution-500 transition-all duration-500";
-      accuracyNote.textContent = "Fallback location — approximate city-level accuracy.";
+      accuracyNote.textContent = "Need a stronger GPS fix; move to open sky and hold still.";
     } else {
       accuracyBar.className = "h-full rounded-full bg-alert-500 transition-all duration-500";
       accuracyNote.textContent = "Low precision — consider moving to open sky and re-acquiring.";
@@ -1272,6 +1424,11 @@
       return;
     }
 
+    if (!currentLocation || !Number.isFinite(currentLocation.accuracy) || Number(currentLocation.accuracy) > GEO_TARGET_ACCURACY) {
+      showToast("Location accuracy must be 5 meters or better. Re-acquire your position and try again.");
+      return;
+    }
+
     isSaving = true;
     submitBtn.disabled = true;
     submitBtnLabel.textContent = "Saving…";
@@ -1309,12 +1466,14 @@
       const remoteResult = await saveRecordToSupabase(row);
       if (remoteResult.ok) {
         saved = remoteResult.data || { ...row, created_at: new Date().toISOString(), source: "database" };
+        localStorage.setItem("fieldcollect.lastRecordSavedAt", String(Date.now()));
         setDbStatus("ok", "Connected");
         showToast("Saved to Supabase database.");
       } else {
         const safeMessage = getSafeMessage(remoteResult.reason, "The database insert failed, so the record was saved locally instead.");
         saved = saveRecordLocally(row);
         if (saved) {
+          localStorage.setItem("fieldcollect.lastRecordSavedAt", String(Date.now()));
           setDbStatus("warn", "Saved locally");
           showToast("Saved locally: " + safeMessage);
         } else {
@@ -1586,123 +1745,85 @@
   let managementMap = null;
   let managementMarkersLayer = null;
   let managementOverlayLayer = null;
-  let managementSelectionLayer = null;
+  let managementCadLayer = null;
   let managementRecords = [];
-  let managementRefreshTimer = null;
-  let managementSelectionMode = false;
-  let managementSelectionVertices = [];
-  let managementSelectionPolygonLayer = null;
-  let managementSelectedRecords = [];
+  let activeDwgFile = null;
+  let libreDwgInstancePromise = null;
+  let selectedRecordIds = new Set();
+  let managementMarkersById = new Map();
 
-  function startManagementAutoRefresh() {
-    if (managementRefreshTimer) clearInterval(managementRefreshTimer);
-    managementRefreshTimer = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        loadMapRecords();
-      }
-    }, 10000);
+  function getManagementRecordKey(record, index = 0) {
+    if (record && record.id != null) return String(record.id);
+    return [
+      record?.created_at || "",
+      record?.latitude ?? "",
+      record?.longitude ?? "",
+      record?.phone || "",
+      index
+    ].join("|");
+  }
 
-    window.addEventListener("storage", (event) => {
-      if (event.key === "fieldcollect.lastRecordSavedAt") {
-        loadMapRecords();
-      }
-    });
-
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) {
-        loadMapRecords();
-      }
+  function createSelectedMarkerIcon() {
+    return window.L.divIcon({
+      className: "",
+      html: '<div class="field-marker-selected" aria-label="Selected report">✓</div>',
+      iconSize: [34, 34],
+      iconAnchor: [17, 34],
+      popupAnchor: [0, -34]
     });
   }
 
-  function updateSelectionSummary() {
-    const summaryEl = $("selectionSummary");
-    if (!summaryEl) return;
-    if (managementSelectedRecords.length) {
-      summaryEl.textContent = `${managementSelectedRecords.length} saved GPS point${managementSelectedRecords.length === 1 ? "" : "s"} selected by the polygon.`;
-    } else if (managementSelectionMode) {
-      summaryEl.textContent = "Click the map to add polygon points. Double-click to finish.";
+  function setManagementMarkerSelected(marker, selected) {
+    if (!marker) return;
+    if (!marker._fieldCollectDefaultIcon) marker._fieldCollectDefaultIcon = marker.getIcon();
+    if (!marker._fieldCollectSelectedIcon) marker._fieldCollectSelectedIcon = createSelectedMarkerIcon();
+    marker.setIcon(selected ? marker._fieldCollectSelectedIcon : marker._fieldCollectDefaultIcon);
+    marker.setZIndexOffset(selected ? 1000 : 0);
+  }
+
+  function getSelectedManagementRecords() {
+    return managementRecords.filter((record, index) => selectedRecordIds.has(getManagementRecordKey(record, index)));
+  }
+
+  function updateManagementSelectionUi() {
+    const selectedCount = selectedRecordIds.size;
+    const totalCount = managementRecords.length;
+    const status = $("selectionStatus");
+    if (status) {
+      status.textContent = `${selectedCount} of ${totalCount} report${totalCount === 1 ? "" : "s"} selected`;
+    }
+
+    const selectAllBtn = $("selectAllRecordsBtn");
+    const clearBtn = $("clearSelectedRecordsBtn");
+    if (selectAllBtn) selectAllBtn.disabled = totalCount === 0 || selectedCount === totalCount;
+    if (clearBtn) clearBtn.disabled = selectedCount === 0;
+
+    ["exportKmlBtn", "exportKmzBtn", "exportTxtBtn"].forEach((id) => {
+      const button = $(id);
+      if (button) button.disabled = selectedCount === 0;
+    });
+  }
+
+  function toggleManagementRecordSelection(recordKey) {
+    if (selectedRecordIds.has(recordKey)) {
+      selectedRecordIds.delete(recordKey);
     } else {
-      summaryEl.textContent = "No polygon selected yet.";
+      selectedRecordIds.add(recordKey);
     }
+    setManagementMarkerSelected(managementMarkersById.get(recordKey), selectedRecordIds.has(recordKey));
+    updateManagementSelectionUi();
   }
 
-  function clearPolygonSelection() {
-    managementSelectionMode = false;
-    managementSelectionVertices = [];
-    managementSelectedRecords = [];
-    if (managementSelectionLayer) managementSelectionLayer.clearLayers();
-    managementSelectionPolygonLayer = null;
-    if ($("drawPolygonBtn")) $("drawPolygonBtn").textContent = "Draw polygon";
-    updateSelectionSummary();
+  function selectAllManagementRecords() {
+    selectedRecordIds = new Set(managementRecords.map((record, index) => getManagementRecordKey(record, index)));
+    managementMarkersById.forEach((marker) => setManagementMarkerSelected(marker, true));
+    updateManagementSelectionUi();
   }
 
-  function isPointInPolygon(lat, lng, polygonPoints) {
-    const points = polygonPoints.map((pt) => [pt.lat, pt.lng]);
-    if (points.length < 3) return false;
-    let inside = false;
-    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
-      const [xi, yi] = points[i];
-      const [xj, yj] = points[j];
-      const intersect = ((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi) / (yj - yi) + xi));
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-
-  function redrawSelectionOverlay() {
-    if (!managementSelectionLayer) return;
-    managementSelectionLayer.clearLayers();
-    if (!managementSelectionVertices.length) return;
-
-    const vertices = managementSelectionVertices;
-    const closed = [...vertices, vertices[0]];
-    managementSelectionPolygonLayer = window.L.polygon(closed, {
-      color: "#2563eb",
-      fillColor: "#60a5fa",
-      fillOpacity: 0.18,
-      weight: 2
-    }).addTo(managementSelectionLayer);
-
-    vertices.forEach((vertex, index) => {
-      const marker = window.L.circleMarker(vertex, {
-        radius: 4,
-        color: "#2563eb",
-        fillColor: "#ffffff",
-        fillOpacity: 1,
-        weight: 2
-      }).addTo(managementSelectionLayer);
-      marker.bindTooltip(`Point ${index + 1}`);
-    });
-  }
-
-  function startPolygonSelection() {
-    clearPolygonSelection();
-    managementSelectionMode = true;
-    if ($("drawPolygonBtn")) $("drawPolygonBtn").textContent = "Finish polygon";
-    updateSelectionSummary();
-    showToast("Click the map to add polygon points. Double-click to finish.");
-  }
-
-  function finishPolygonSelection() {
-    if (managementSelectionVertices.length < 3) {
-      showToast("Draw at least 3 points to create a polygon.");
-      return;
-    }
-
-    managementSelectedRecords = managementRecords.filter((record) => {
-      const lat = Number(record.latitude);
-      const lng = Number(record.longitude);
-      return Number.isFinite(lat) && Number.isFinite(lng) && isPointInPolygon(lat, lng, managementSelectionVertices);
-    });
-    managementSelectionMode = false;
-    redrawSelectionOverlay();
-    updateSelectionSummary();
-    if (!managementSelectedRecords.length) {
-      showToast("No saved GPS points were inside that polygon.");
-    } else {
-      showToast(`${managementSelectedRecords.length} saved GPS points selected.`);
-    }
+  function clearManagementSelection() {
+    selectedRecordIds.clear();
+    managementMarkersById.forEach((marker) => setManagementMarkerSelected(marker, false));
+    updateManagementSelectionUi();
   }
 
   function initManagementMap() {
@@ -1728,53 +1849,39 @@
     satelliteLayer.addTo(managementMap);
     managementMarkersLayer = window.L.layerGroup().addTo(managementMap);
     managementOverlayLayer = window.L.layerGroup().addTo(managementMap);
-    managementSelectionLayer = window.L.layerGroup().addTo(managementMap);
-    window.L.control.layers({ "OpenStreetMap": osmLayer, "Satellite": satelliteLayer }, { "Saved pins": managementMarkersLayer, "GIS overlay": managementOverlayLayer, "Selection": managementSelectionLayer }).addTo(managementMap);
-    managementMap.on("click", (event) => {
-      if (!managementSelectionMode) return;
-      managementSelectionVertices.push(event.latlng);
-      redrawSelectionOverlay();
-      updateSelectionSummary();
-    });
-    managementMap.on("dblclick", (event) => {
-      if (!managementSelectionMode) return;
-      event.originalEvent.preventDefault();
-      event.originalEvent.stopPropagation();
-      finishPolygonSelection();
-    });
+    managementCadLayer = window.L.layerGroup().addTo(managementMap);
+    window.L.control.layers(
+      { "OpenStreetMap": osmLayer, "Satellite": satelliteLayer },
+      { "Saved pins": managementMarkersLayer, "GIS overlay": managementOverlayLayer, "AutoCAD drawing": managementCadLayer }
+    ).addTo(managementMap);
     setTimeout(() => managementMap.invalidateSize(), 150);
   }
 
   async function loadMapRecords() {
-    if (!managementMap || !window.L) return;
+    if (!managementMap || !window.L || !sb) return;
     if (managementMarkersLayer) managementMarkersLayer.clearLayers();
     managementRecords = [];
+    selectedRecordIds.clear();
+    managementMarkersById.clear();
+    updateManagementSelectionUi();
 
     try {
-      let rows = [];
-      if (sb) {
-        const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
-        if (error) throw error;
-        rows = data || [];
-      } else {
-        rows = JSON.parse(localStorage.getItem("fieldcollect.localRecords") || "[]");
-      }
-
-      managementRecords = rows.filter((record) => {
+      const { data, error } = await sb.from(TABLE_NAME).select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      managementRecords = (data || []).filter((record) => Number.isFinite(record.latitude) && Number.isFinite(record.longitude));
+      managementRecords.forEach((record, index) => {
         const lat = Number(record.latitude);
         const lng = Number(record.longitude);
-        return Number.isFinite(lat) && Number.isFinite(lng);
-      });
-
-      managementRecords.forEach((record) => {
-        const lat = Number(record.latitude);
-        const lng = Number(record.longitude);
+        const recordKey = getManagementRecordKey(record, index);
         const marker = window.L.marker([lat, lng]).addTo(managementMarkersLayer);
+        marker._fieldCollectDefaultIcon = marker.getIcon();
+        managementMarkersById.set(recordKey, marker);
+
         const address = record.address || "Address unavailable";
-        const name = record.full_name || record.fullName || record.name || "Record";
-        const phone = record.phone || record.phoneNumber || record.contact || "—";
-        marker.bindPopup(`<strong>${escapeHtml(String(name))}</strong><br>${escapeHtml(String(phone))}<br>${escapeHtml(String(address))}`);
+        marker.bindPopup(`<strong>${escapeHtml(record.full_name || "Record")}</strong><br>${escapeHtml(record.phone || "—")}<br>${escapeHtml(address)}<br><span style="font-size:11px;color:#64748b;">Click pin to select or deselect for export.</span>`);
+        marker.on("click", () => toggleManagementRecordSelection(recordKey));
       });
+      updateManagementSelectionUi();
 
       if (managementRecords.length && managementMarkersLayer) {
         const group = window.L.featureGroup(managementMarkersLayer.getLayers());
@@ -1784,6 +1891,414 @@
       }
     } catch (err) {
       console.warn("Could not load map records:", err);
+      updateManagementSelectionUi();
+    }
+  }
+
+
+  const DWG_CRS_DEFINITIONS = {
+    "EPSG:4326": "+proj=longlat +datum=WGS84 +no_defs +type=crs",
+    "EPSG:25000": "+proj=tmerc +lat_0=4.66666666666667 +lon_0=-1 +k=0.99975 +x_0=274319.51 +y_0=0 +a=6378249.145 +rf=293.465 +towgs84=-130,29,364,0,0,0,0 +units=m +no_defs +type=crs",
+    "EPSG:2136": "+proj=tmerc +lat_0=4.66666666666667 +lon_0=-1 +k=0.99975 +x_0=274319.739163358 +y_0=0 +a=6378300 +rf=296 +towgs84=-170,33,326,0,0,0,0 +to_meter=0.304799710181509 +no_defs +type=crs",
+    "EPSG:32630": "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs +type=crs",
+    "EPSG:32631": "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs +type=crs"
+  };
+
+  const DWG_CRS_LABELS = {
+    "EPSG:4326": "WGS 84 longitude / latitude",
+    "EPSG:25000": "Leigon / Ghana Metre Grid",
+    "EPSG:2136": "Accra / Ghana National Grid",
+    "EPSG:32630": "WGS 84 / UTM zone 30N",
+    "EPSG:32631": "WGS 84 / UTM zone 31N"
+  };
+
+  function setDwgStatus(message, state = "neutral") {
+    const status = $("dwgImportStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.className = "text-[11px] leading-snug " + (
+      state === "error" ? "text-alert-500" :
+      state === "success" ? "text-signal-600" :
+      state === "working" ? "text-brand-600" : "text-slate-500"
+    );
+  }
+
+  function clearDwgLayer(resetInput = true) {
+    if (managementCadLayer) managementCadLayer.clearLayers();
+    activeDwgFile = null;
+    const clearBtn = $("clearDwgLayerBtn");
+    if (clearBtn) clearBtn.disabled = true;
+    if (resetInput && $("dwgLayerInput")) $("dwgLayerInput").value = "";
+    setDwgStatus("No AutoCAD drawing loaded.");
+  }
+
+  function normalizeDwgType(entity) {
+    const raw = entity?.type ?? entity?.entityType ?? entity?.dxftype ?? entity?.name ?? entity?.constructor?.name ?? "";
+    return String(raw).toUpperCase().replace(/^DWG[_-]?/, "").replace(/[^A-Z0-9]/g, "");
+  }
+
+  function cadPoint(value) {
+    if (!value) return null;
+    if (Array.isArray(value) && value.length >= 2) {
+      const x = Number(value[0]);
+      const y = Number(value[1]);
+      return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+    }
+    const candidate = value.point || value.position || value.location || value.vertex || value.coordinates || value;
+    const x = Number(candidate.x ?? candidate.X ?? candidate[0]);
+    const y = Number(candidate.y ?? candidate.Y ?? candidate[1]);
+    return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+  }
+
+  function entityPoint(entity, ...keys) {
+    for (const key of keys) {
+      const point = cadPoint(entity?.[key]);
+      if (point) return point;
+    }
+    return null;
+  }
+
+  function entityVertices(entity) {
+    const source = entity?.vertices || entity?.vertexes || entity?.points || entity?.controlPoints || entity?.fitPoints || [];
+    return Array.from(source || []).map((vertex) => {
+      const point = cadPoint(vertex);
+      if (!point) return null;
+      return { point, bulge: Number(vertex?.bulge ?? vertex?.bulgeValue ?? 0) || 0 };
+    }).filter(Boolean);
+  }
+
+  function entityProperties(entity, type) {
+    return {
+      entity_type: type,
+      layer: String(entity?.layer ?? entity?.layerName ?? "0"),
+      handle: String(entity?.handle ?? entity?.id ?? ""),
+      text: String(entity?.text ?? entity?.value ?? entity?.plainText ?? ""),
+      block: String(entity?.blockName ?? entity?.name ?? "")
+    };
+  }
+
+  function feature(geometry, properties) {
+    return geometry ? { type: "Feature", properties, geometry } : null;
+  }
+
+  function angleRadians(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 0;
+    return Math.abs(number) > Math.PI * 2 + 0.01 ? number * Math.PI / 180 : number;
+  }
+
+  function sampleArc(center, radius, startAngle, endAngle, segments = 48) {
+    let start = angleRadians(startAngle);
+    let end = angleRadians(endAngle);
+    while (end <= start) end += Math.PI * 2;
+    const count = Math.max(8, Math.min(180, Math.ceil(segments * (end - start) / (Math.PI * 2))));
+    const points = [];
+    for (let index = 0; index <= count; index += 1) {
+      const angle = start + (end - start) * index / count;
+      points.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)]);
+    }
+    return points;
+  }
+
+  function expandBulgedVertices(vertices, closed) {
+    if (vertices.length < 2) return vertices.map((item) => item.point);
+    const result = [];
+    const segmentCount = closed ? vertices.length : vertices.length - 1;
+    for (let index = 0; index < segmentCount; index += 1) {
+      const current = vertices[index];
+      const next = vertices[(index + 1) % vertices.length];
+      const p1 = current.point;
+      const p2 = next.point;
+      if (!result.length) result.push(p1);
+      const bulge = current.bulge;
+      if (Math.abs(bulge) < 1e-10) {
+        result.push(p2);
+        continue;
+      }
+      const dx = p2[0] - p1[0];
+      const dy = p2[1] - p1[1];
+      const chord = Math.hypot(dx, dy);
+      if (!chord) continue;
+      const sweep = 4 * Math.atan(bulge);
+      const midpoint = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+      const centerOffset = chord * (1 - bulge * bulge) / (4 * bulge);
+      const center = [midpoint[0] - dy / chord * centerOffset, midpoint[1] + dx / chord * centerOffset];
+      const start = Math.atan2(p1[1] - center[1], p1[0] - center[0]);
+      const steps = Math.max(4, Math.min(72, Math.ceil(Math.abs(sweep) / (Math.PI / 18))));
+      for (let step = 1; step <= steps; step += 1) {
+        const angle = start + sweep * step / steps;
+        const radius = Math.hypot(p1[0] - center[0], p1[1] - center[1]);
+        result.push([center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)]);
+      }
+    }
+    return result;
+  }
+
+  function dwgEntityToFeature(entity) {
+    const type = normalizeDwgType(entity);
+    const properties = entityProperties(entity, type || "UNKNOWN");
+
+    if (type === "LINE" || type === "XLINE" || type === "RAY") {
+      const start = entityPoint(entity, "startPoint", "start", "startPt", "start_point");
+      const end = entityPoint(entity, "endPoint", "end", "endPt", "end_point");
+      return start && end ? feature({ type: "LineString", coordinates: [start, end] }, properties) : null;
+    }
+
+    if (type.includes("LWPOLYLINE") || type === "POLYLINE" || type.includes("POLYLINE2D") || type.includes("POLYLINE3D")) {
+      const vertices = entityVertices(entity);
+      const closed = Boolean(entity?.closed ?? entity?.isClosed ?? ((Number(entity?.flag ?? entity?.flags ?? 0) & 1) === 1));
+      const points = expandBulgedVertices(vertices, closed);
+      if (points.length < 2) return null;
+      if (closed && (points[0][0] !== points[points.length - 1][0] || points[0][1] !== points[points.length - 1][1])) points.push([...points[0]]);
+      return feature({ type: "LineString", coordinates: points }, properties);
+    }
+
+    if (type === "ARC") {
+      const center = entityPoint(entity, "center", "centerPoint");
+      const radius = Number(entity?.radius);
+      return center && Number.isFinite(radius) && radius > 0
+        ? feature({ type: "LineString", coordinates: sampleArc(center, radius, entity?.startAngle, entity?.endAngle) }, properties)
+        : null;
+    }
+
+    if (type === "CIRCLE") {
+      const center = entityPoint(entity, "center", "centerPoint");
+      const radius = Number(entity?.radius);
+      return center && Number.isFinite(radius) && radius > 0
+        ? feature({ type: "LineString", coordinates: sampleArc(center, radius, 0, Math.PI * 2, 64) }, properties)
+        : null;
+    }
+
+    if (type === "ELLIPSE") {
+      const center = entityPoint(entity, "center", "centerPoint");
+      const major = entityPoint(entity, "majorAxisEndPoint", "majorAxis", "majorAxisVector");
+      const ratio = Number(entity?.axisRatio ?? entity?.ratio ?? 1);
+      if (!center || !major || !Number.isFinite(ratio) || ratio <= 0) return null;
+      const majorLength = Math.hypot(major[0], major[1]);
+      const rotation = Math.atan2(major[1], major[0]);
+      const start = angleRadians(entity?.startParameter ?? entity?.startAngle ?? 0);
+      let end = angleRadians(entity?.endParameter ?? entity?.endAngle ?? Math.PI * 2);
+      while (end <= start) end += Math.PI * 2;
+      const points = [];
+      for (let index = 0; index <= 64; index += 1) {
+        const angle = start + (end - start) * index / 64;
+        const localX = majorLength * Math.cos(angle);
+        const localY = majorLength * ratio * Math.sin(angle);
+        points.push([
+          center[0] + localX * Math.cos(rotation) - localY * Math.sin(rotation),
+          center[1] + localX * Math.sin(rotation) + localY * Math.cos(rotation)
+        ]);
+      }
+      return feature({ type: "LineString", coordinates: points }, properties);
+    }
+
+    if (type === "SPLINE") {
+      const vertices = entityVertices(entity).map((item) => item.point);
+      return vertices.length >= 2 ? feature({ type: "LineString", coordinates: vertices }, properties) : null;
+    }
+
+    if (type === "3DFACE" || type === "SOLID" || type === "TRACE") {
+      const points = [
+        entityPoint(entity, "firstCorner", "corner1", "point1"),
+        entityPoint(entity, "secondCorner", "corner2", "point2"),
+        entityPoint(entity, "thirdCorner", "corner3", "point3"),
+        entityPoint(entity, "fourthCorner", "corner4", "point4")
+      ].filter(Boolean);
+      if (points.length < 3) return null;
+      points.push([...points[0]]);
+      return feature({ type: "LineString", coordinates: points }, properties);
+    }
+
+    if (type === "POINT" || type === "INSERT" || type === "TEXT" || type === "MTEXT" || type.includes("ATTRIB")) {
+      const point = entityPoint(entity, "position", "location", "point", "insertionPoint", "insertPoint", "alignmentPoint", "firstAlignmentPoint");
+      return point ? feature({ type: "Point", coordinates: point }, properties) : null;
+    }
+
+    return null;
+  }
+
+  function getDwgEntities(database) {
+    const entities = database?.entities ?? database?.modelSpace?.entities ?? database?.modelspace?.entities ?? [];
+    return Array.isArray(entities) ? entities : Object.values(entities || {});
+  }
+
+  function walkCoordinates(coordinates, callback) {
+    if (!Array.isArray(coordinates)) return;
+    if (coordinates.length >= 2 && Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]))) {
+      callback(coordinates);
+      return;
+    }
+    coordinates.forEach((child) => walkCoordinates(child, callback));
+  }
+
+  function coordinateSamples(featureCollection, limit = 250) {
+    const samples = [];
+    for (const item of featureCollection.features) {
+      walkCoordinates(item.geometry?.coordinates, (point) => {
+        if (samples.length < limit) samples.push([Number(point[0]), Number(point[1])]);
+      });
+      if (samples.length >= limit) break;
+    }
+    return samples;
+  }
+
+  function registerDwgCoordinateSystems() {
+    if (!window.proj4) throw new Error("Coordinate transformation library could not be loaded.");
+    Object.entries(DWG_CRS_DEFINITIONS).forEach(([code, definition]) => window.proj4.defs(code, definition));
+  }
+
+  function transformPointToWgs84(point, sourceCrs) {
+    const transformed = sourceCrs === "EPSG:4326" ? point : window.proj4(sourceCrs, "EPSG:4326", point);
+    const lon = Number(transformed[0]);
+    const lat = Number(transformed[1]);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      throw new Error("The drawing contains coordinates that cannot be placed on the map.");
+    }
+    return [lon, lat];
+  }
+
+  function isInsideGhana(point, padding = 0.6) {
+    const [lon, lat] = point;
+    return lon >= -3.4 - padding && lon <= 1.3 + padding && lat >= 4.5 - padding && lat <= 11.2 + padding;
+  }
+
+  function detectDwgCrs(samples) {
+    const candidates = ["EPSG:4326", "EPSG:25000", "EPSG:2136", "EPSG:32630", "EPSG:32631"];
+    let best = null;
+    for (const code of candidates) {
+      let valid = 0;
+      let inside = 0;
+      for (const sample of samples) {
+        try {
+          const point = transformPointToWgs84(sample, code);
+          valid += 1;
+          if (isInsideGhana(point)) inside += 1;
+        } catch (_) {}
+      }
+      const score = valid ? inside / valid : 0;
+      if (!best || score > best.score) best = { code, score, valid };
+    }
+    return best && best.valid >= Math.min(3, samples.length) && best.score >= 0.7 ? best.code : null;
+  }
+
+  function transformFeatureCollection(featureCollection, sourceCrs) {
+    const transformCoordinates = (coordinates) => {
+      if (!Array.isArray(coordinates)) return coordinates;
+      if (coordinates.length >= 2 && Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]))) {
+        return transformPointToWgs84([Number(coordinates[0]), Number(coordinates[1])], sourceCrs);
+      }
+      return coordinates.map(transformCoordinates);
+    };
+    return {
+      type: "FeatureCollection",
+      features: featureCollection.features.map((item) => ({
+        ...item,
+        geometry: { ...item.geometry, coordinates: transformCoordinates(item.geometry.coordinates) }
+      }))
+    };
+  }
+
+  async function getLibreDwgInstance() {
+    if (!libreDwgInstancePromise) {
+      libreDwgInstancePromise = import("https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.9/dist/libredwg-web.js")
+        .then(({ LibreDwg }) => LibreDwg.create("https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.9/wasm"));
+    }
+    return libreDwgInstancePromise;
+  }
+
+  function cadPopupHtml(featureItem) {
+    const properties = featureItem?.properties || {};
+    const lines = [
+      properties.layer ? `<strong>${escapeHtml(properties.layer)}</strong>` : "AutoCAD entity",
+      properties.entity_type ? `Type: ${escapeHtml(properties.entity_type)}` : "",
+      properties.text ? escapeHtml(properties.text) : "",
+      properties.block ? `Block: ${escapeHtml(properties.block)}` : ""
+    ].filter(Boolean);
+    return lines.join("<br>");
+  }
+
+  async function overlayDwgLayer(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (!managementMap || !managementCadLayer || !window.L) {
+      setDwgStatus("The map is not ready. Reload the page and try again.", "error");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".dwg")) {
+      setDwgStatus("Select a valid AutoCAD DWG file.", "error");
+      return;
+    }
+
+    setDwgStatus(`Opening ${file.name}…`, "working");
+    const clearBtn = $("clearDwgLayerBtn");
+    if (clearBtn) clearBtn.disabled = true;
+
+    let dwgPointer = null;
+    try {
+      registerDwgCoordinateSystems();
+      const [{ Dwg_File_Type }, libredwg, fileContent] = await Promise.all([
+        import("https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.9/dist/libredwg-web.js"),
+        getLibreDwgInstance(),
+        file.arrayBuffer()
+      ]);
+
+      dwgPointer = libredwg.dwg_read_data(fileContent, Dwg_File_Type.DWG);
+      if (!dwgPointer) throw new Error("The DWG parser could not open this drawing.");
+      const database = libredwg.convert(dwgPointer);
+      const entities = getDwgEntities(database);
+      const features = entities.map(dwgEntityToFeature).filter(Boolean);
+      if (!features.length) throw new Error("The drawing opened, but no supported 2D map geometry was found.");
+
+      const rawCollection = { type: "FeatureCollection", features };
+      const samples = coordinateSamples(rawCollection);
+      if (!samples.length) throw new Error("The drawing has no usable X and Y coordinates.");
+
+      const selectedCrs = $("dwgCrsSelect")?.value || "auto";
+      const sourceCrs = selectedCrs === "auto" ? detectDwgCrs(samples) : selectedCrs;
+      if (!sourceCrs) {
+        throw new Error("The drawing coordinate system could not be detected. Select its coordinate system and open the file again.");
+      }
+
+      const geojson = transformFeatureCollection(rawCollection, sourceCrs);
+      managementCadLayer.clearLayers();
+      const layer = window.L.geoJSON(geojson, {
+        style: () => ({ color: "#2563eb", weight: 2, opacity: 0.9, fillOpacity: 0.08 }),
+        pointToLayer: (featureItem, latlng) => window.L.circleMarker(latlng, {
+          radius: 4,
+          color: "#1d4ed8",
+          weight: 2,
+          fillColor: "#ffffff",
+          fillOpacity: 0.9
+        }),
+        onEachFeature: (featureItem, mapLayer) => mapLayer.bindPopup(cadPopupHtml(featureItem))
+      }).addTo(managementCadLayer);
+
+      if (!layer.getBounds || !layer.getBounds().isValid()) {
+        managementCadLayer.clearLayers();
+        throw new Error("The drawing was converted, but its map extent is invalid.");
+      }
+
+      managementMap.fitBounds(layer.getBounds(), { padding: [24, 24] });
+      activeDwgFile = file.name;
+      if (clearBtn) clearBtn.disabled = false;
+      setDwgStatus(`${file.name} displayed as ${features.length} GIS feature${features.length === 1 ? "" : "s"} using ${DWG_CRS_LABELS[sourceCrs]}.`, "success");
+      showToast("AutoCAD drawing added to the map.");
+    } catch (error) {
+      console.error("DWG import failed:", error);
+      if (managementCadLayer) managementCadLayer.clearLayers();
+      let message = error?.message || "The AutoCAD drawing could not be opened.";
+      if (/both async and sync fetching of the wasm failed|failed to fetch.*wasm|wasm.*failed/i.test(message)) {
+        message = "The DWG engine could not load. Keep the page open through Live Server, confirm internet access, and try the drawing again.";
+      }
+      setDwgStatus(message, "error");
+      showToast(message);
+    } finally {
+      if (dwgPointer) {
+        try {
+          const libredwg = await getLibreDwgInstance();
+          libredwg.dwg_free(dwgPointer);
+        } catch (_) {}
+      }
     }
   }
 
@@ -1820,52 +2335,47 @@
   }
 
   function exportCoordinates(format) {
-    const exportRecords = managementSelectedRecords.length ? managementSelectedRecords : managementRecords;
-    if (!exportRecords.length) {
+    if (!managementRecords.length) {
       showToast("No records available to export.");
       return;
     }
 
-    const filenamePrefix = managementSelectedRecords.length ? "fieldcollect-selected-records" : "fieldcollect-records";
+    const selectedRecords = getSelectedManagementRecords();
+    if (!selectedRecords.length) {
+      showToast("Select at least one report on the map before exporting.");
+      return;
+    }
 
     if (format === "kml") {
-      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${filenamePrefix}</name>\n${exportRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
-      downloadTextFile(`${filenamePrefix}.kml`, content);
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Selected Records</name>\n${selectedRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile("fieldcollect-selected-records.kml", content);
     } else if (format === "kmz") {
-      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${filenamePrefix}</name>\n${exportRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
-      downloadTextFile(`${filenamePrefix}.kmz`, content);
+      const content = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>FieldCollect Selected Records</name>\n${selectedRecords.map((record) => `    <Placemark>\n      <name>${escapeHtml(record.full_name || "Record")}</name>\n      <description>${escapeHtml(record.phone || "")}</description>\n      <Point><coordinates>${record.longitude ?? ""},${record.latitude ?? ""},0</coordinates></Point>\n    </Placemark>`).join("\n")}\n  </Document>\n</kml>`;
+      downloadTextFile("fieldcollect-selected-records.kmz", content);
     } else {
-      const lines = ["Name\tPhone\tLatitude\tLongitude\tAddress", ...exportRecords.map((record) => `${record.full_name || ""}\t${record.phone || ""}\t${record.latitude ?? ""}\t${record.longitude ?? ""}\t${record.address || ""}`)];
-      downloadTextFile(`${filenamePrefix}.txt`, lines.join("\n"));
+      const lines = ["Name\tPhone\tLatitude\tLongitude\tAddress", ...selectedRecords.map((record) => `${record.full_name || ""}\t${record.phone || ""}\t${record.latitude ?? ""}\t${record.longitude ?? ""}\t${record.address || ""}`)];
+      downloadTextFile("fieldcollect-selected-records.txt", lines.join("\n"));
     }
-    showToast("Export ready.");
+    showToast(`${selectedRecords.length} selected report${selectedRecords.length === 1 ? "" : "s"} exported.`);
   }
 
   function bindManagementDashboard() {
     const gisInput = $("gisLayerInput");
+    const dwgInput = $("dwgLayerInput");
     if (gisInput) gisInput.addEventListener("change", overlayGISLayer);
-    $("drawPolygonBtn")?.addEventListener("click", () => {
-      if (managementSelectionMode) {
-        finishPolygonSelection();
-      } else {
-        startPolygonSelection();
-      }
-    });
-    $("clearSelectionBtn")?.addEventListener("click", clearPolygonSelection);
+    if (dwgInput) dwgInput.addEventListener("change", overlayDwgLayer);
+    $("clearDwgLayerBtn")?.addEventListener("click", () => clearDwgLayer(true));
+    $("selectAllRecordsBtn")?.addEventListener("click", selectAllManagementRecords);
+    $("clearSelectedRecordsBtn")?.addEventListener("click", clearManagementSelection);
     $("exportKmlBtn")?.addEventListener("click", () => exportCoordinates("kml"));
     $("exportKmzBtn")?.addEventListener("click", () => exportCoordinates("kmz"));
     $("exportTxtBtn")?.addEventListener("click", () => exportCoordinates("txt"));
+    updateManagementSelectionUi();
   }
 
-  function initializeManagementDashboard(force = false) {
-    if (!window.L || !$("map")) return;
-    if (!managementMap || force) {
-      initManagementMap();
-    } else {
-      setTimeout(() => managementMap.invalidateSize(), 120);
-    }
+  function initializeManagementDashboard() {
+    initManagementMap();
     bindManagementDashboard();
-    startManagementAutoRefresh();
     loadMapRecords();
   }
 
